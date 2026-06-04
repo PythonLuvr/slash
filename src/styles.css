@@ -313,6 +313,64 @@
   text-align: center;
 }
 
+/* --- Infobar (non-blocking strip under the chrome) --- */
+#infobar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 12px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+}
+
+.ib-text {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.ib-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#infobar button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+#infobar button:hover {
+  background: var(--raised-2);
+}
+
+#infobar .ib-primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 500;
+}
+
+#infobar .ib-primary:hover {
+  background: var(--accent-hover);
+}
+
+#infobar #ib-close {
+  width: 28px;
+  padding: 0;
+  border-color: transparent;
+  color: var(--muted);
+}
+
 /* --- Bookmarks bar --- */
 #bookmarks {
   display: flex;

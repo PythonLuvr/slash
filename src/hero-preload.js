@@ -9,6 +9,4 @@ contextBridge.exposeInMainWorld('hero', {
   getProviders: () => ipcRenderer.invoke('providers:get'),
   suggest: (q) => ipcRenderer.invoke('suggest:get', q),
   onAddDial: (cb) => ipcRenderer.on('hero:add-dial', (_e, d) => cb(d)),
-  onFirstRun: (cb) => ipcRenderer.on('hero:first-run', () => cb()),
-  firstRunChoice: (setDefault) => ipcRenderer.send('firstrun:choice', setDefault),
 });

@@ -211,4 +211,13 @@ $('menu-btn').addEventListener('click', () => window.slash.togglePop('menu'));
 $('profile').addEventListener('click', () => window.slash.togglePop('profile'));
 $('downloads').addEventListener('click', () => window.slash.togglePop('downloads'));
 
+// First-run default-browser infobar (a non-blocking strip; main controls the
+// chrome height so it pushes content down rather than overlapping it).
+const infobar = $('infobar');
+window.slash.onFirstRun(() => infobar.classList.remove('hidden'));
+window.slash.onFirstRunHide(() => infobar.classList.add('hidden'));
+$('ib-set').addEventListener('click', () => window.slash.firstRunChoice(true));
+$('ib-later').addEventListener('click', () => window.slash.firstRunChoice(false));
+$('ib-close').addEventListener('click', () => window.slash.firstRunChoice(false));
+
 window.slash.ready();

@@ -30,4 +30,8 @@ contextBridge.exposeInMainWorld('slash', {
   onBookmarks: (cb) => ipcRenderer.on('bookmarks', (_e, list) => cb(list)),
   onFocusOmnibox: (cb) => ipcRenderer.on('focus-omnibox', () => cb()),
   onBlocked: (cb) => ipcRenderer.on('blocked', (_e, d) => cb(d)),
+  // First-run default-browser infobar
+  onFirstRun: (cb) => ipcRenderer.on('first-run', () => cb()),
+  onFirstRunHide: (cb) => ipcRenderer.on('first-run-hide', () => cb()),
+  firstRunChoice: (setDefault) => ipcRenderer.send('firstrun:choice', setDefault),
 });

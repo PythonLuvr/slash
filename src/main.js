@@ -31,7 +31,10 @@ if (!app.requestSingleInstanceLock()) {
 const TABSTRIP_HEIGHT = 38;
 const TOOLBAR_HEIGHT = 56;
 const BOOKMARKS_HEIGHT = 34;
-const CHROME_HEIGHT = TABSTRIP_HEIGHT + TOOLBAR_HEIGHT + BOOKMARKS_HEIGHT;
+const INFOBAR_HEIGHT = 40;
+const BASE_CHROME = TABSTRIP_HEIGHT + TOOLBAR_HEIGHT + BOOKMARKS_HEIGHT;
+let CHROME_HEIGHT = BASE_CHROME; // grows by INFOBAR_HEIGHT while an infobar shows
+let infobarOpen = false;
 const FIND_W = 360;
 const FIND_HEIGHT = 44;
 const AI_WIDTH = 400;
@@ -991,7 +994,6 @@ function createWindow() {
   win.contentView.addChildView(heroView);
   heroView.webContents.loadFile(path.join(__dirname, 'hero.html'));
   heroView.setVisible(false);
-  heroView.webContents.once('did-finish-load', maybeShowFirstRun);
 
   interstitialView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'interstitial-preload.js') },
@@ -1451,6 +1453,7 @@ ipcMain.on('ready', () => {
   sendDownloads();
   sendBookmarks();
   sendBlocked();
+  maybeShowFirstRun();
 });
 ipcMain.on('zoom', (_e, dir) => {
   const at = activeTab();
@@ -1616,15 +1619,21 @@ ipcMain.on('ai:to-sidebar', (_e, data) => {
   aiView.webContents.send('ai:load', data);
 });
 
-// --- First-run "set as default" prompt (shown once to new users) ---
+// --- First-run "set as default" infobar (a non-blocking strip in the chrome) ---
+function showInfobar(open) {
+  infobarOpen = open;
+  CHROME_HEIGHT = BASE_CHROME + (open ? INFOBAR_HEIGHT : 0);
+  if (chromeView) chromeView.webContents.send(open ? 'first-run' : 'first-run-hide');
+  layout();
+}
 function maybeShowFirstRun() {
   const s = readSettings();
-  if (s.seenDefaultPrompt) return;
+  if (s.seenDefaultPrompt || infobarOpen) return;
   if (app.isDefaultProtocolClient('http')) {
     writeSettings({ seenDefaultPrompt: true });
     return;
   }
-  if (heroView) heroView.webContents.send('hero:first-run');
+  showInfobar(true);
 }
 ipcMain.on('firstrun:choice', (_e, setDefault) => {
   if (setDefault) {
@@ -1633,6 +1642,7 @@ ipcMain.on('firstrun:choice', (_e, setDefault) => {
     if (process.platform === 'win32') shell.openExternal('ms-settings:defaultapps').catch(() => {});
   }
   writeSettings({ seenDefaultPrompt: true });
+  showInfobar(false);
 });
 
 // --- IPC: default browser ---
