@@ -83,3 +83,41 @@ body {
 .hidden {
   display: none !important;
 }
+
+/* Thinking indicator: three bouncing dots while the AI composes a reply. */
+.dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 1em;
+  vertical-align: middle;
+}
+
+.dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: dot-bounce 1.1s infinite ease-in-out both;
+}
+
+.dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes dot-bounce {
+  0%,
+  70%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  35% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}

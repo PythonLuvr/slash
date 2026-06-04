@@ -253,7 +253,7 @@ function sendAI() {
 
   const el = appendMessage('assistant', '');
   el.classList.add('thinking');
-  el.textContent = '…';
+  el.innerHTML = '<span class="dots"><span></span><span></span><span></span></span>';
   current = { el, buf: '' };
 
   window.ai.send({
