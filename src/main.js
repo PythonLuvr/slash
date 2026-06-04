@@ -150,27 +150,79 @@ function permLabel(permission, details) {
 }
 
 // --- HTTPS-only ---
-// Upgrade top-level http navigations to https. If https then fails, the tab
-// shows an interstitial offering a per-site "continue to HTTP" escape hatch.
-function setupHttpsOnly() {
-  session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*'] }, (details, cb) => {
-    if (!httpsOnly || details.resourceType !== 'mainFrame') return cb({});
-    let host = '';
+// Upgrade http navigations to https at the navigation layer (the network
+// onBeforeRequest hook is owned by the ad/tracker blocker). If https then
+// fails, the tab shows an interstitial with a per-site "continue to HTTP"
+// escape hatch. Returns the URL to actually load.
+function maybeUpgradeForNav(url) {
+  if (!httpsOnly || !/^http:\/\//i.test(url)) return url;
+  let host = '';
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return url;
+  }
+  // Leave local development alone.
+  if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.endsWith('.localhost')) {
+    return url;
+  }
+  if (store.isHttpAllowed(originOf(url))) return url;
+  const https = url.replace(/^http:/i, 'https:');
+  upgraded.set(https, url);
+  return https;
+}
+
+// --- Ad / tracker blocking (EasyList + EasyPrivacy via @ghostery/adblocker) ---
+let blocker = null;
+
+async function setupBlocker() {
+  if (!readSettings().blockAds) return;
+  try {
+    const { ElectronBlocker } = await import('@ghostery/adblocker-electron');
+    blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
+      path: path.join(app.getPath('userData'), 'slash-adblocker.bin'),
+      read: fs.promises.readFile,
+      write: fs.promises.writeFile,
+    });
+    blocker.enableBlockingInSession(session.defaultSession);
+    blocker.on('request-blocked', onRequestBlocked);
+  } catch {
+    blocker = null;
+  }
+}
+
+function setBlocking(on) {
+  try {
+    if (on) {
+      if (blocker) blocker.enableBlockingInSession(session.defaultSession);
+      else setupBlocker();
+    } else if (blocker) {
+      blocker.disableBlockingInSession(session.defaultSession);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function onRequestBlocked(request) {
+  const id = request && request.tabId;
+  if (!id) return;
+  const tab = tabs.find((t) => {
     try {
-      host = new URL(details.url).hostname;
+      return t.view.webContents.id === id;
     } catch {
-      return cb({});
+      return false;
     }
-    // Leave local development alone.
-    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.endsWith('.localhost')) {
-      return cb({});
-    }
-    const origin = originOf(details.url);
-    if (store.isHttpAllowed(origin)) return cb({});
-    const https = details.url.replace(/^http:/i, 'https:');
-    upgraded.set(https, details.url);
-    cb({ redirectURL: https });
   });
+  if (!tab) return;
+  tab.blocked = (tab.blocked || 0) + 1;
+  if (tab.id === activeTabId) sendBlocked();
+}
+
+function sendBlocked() {
+  if (!chromeView) return;
+  const at = activeTab();
+  chromeView.webContents.send('blocked', at ? at.blocked || 0 : 0);
 }
 
 function setupPermissions() {
@@ -254,7 +306,7 @@ let aiOpen = false;
 function normalizeInput(input) {
   const text = (input || '').trim();
   if (!text) return null;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return maybeUpgradeForNav(text);
   if (/^[^\s]+\.[^\s]+$/.test(text)) return 'https://' + text;
   return searchURL(text);
 }
@@ -637,6 +689,7 @@ function createTab(opts = {}) {
     canGoForward: false,
     loading: false,
     failedHttp: null, // set when an https upgrade fails (HTTPS-only)
+    blocked: 0, // ads/trackers blocked on the current page
   };
   const wc = view.webContents;
 
@@ -694,9 +747,19 @@ function createTab(opts = {}) {
     }
   });
   wc.on('did-start-loading', () => {
+    tab.blocked = 0;
     if (tab.failedHttp) {
       tab.failedHttp = null;
       if (id === activeTabId) updateContentVisibility();
+    }
+    if (id === activeTabId) sendBlocked();
+  });
+  // HTTPS-only: upgrade http link navigations before they load.
+  wc.on('will-navigate', (e, url) => {
+    const up = maybeUpgradeForNav(url);
+    if (up !== url) {
+      e.preventDefault();
+      wc.loadURL(up);
     }
   });
   // Right-click anywhere in the page opens our custom context menu.
@@ -733,6 +796,7 @@ function activateTab(id) {
   updateContentVisibility();
   sendState();
   sendTabs();
+  sendBlocked();
 }
 
 function closeTab(id) {
@@ -997,9 +1061,9 @@ app.whenReady().then(() => {
   httpsOnly = readSettings().httpsOnly;
   applyDoh();
   setupPermissions();
-  setupHttpsOnly();
   setupDownloads();
   createWindow();
+  setupBlocker();
   app.on('activate', () => {
     if (BaseWindow.getAllWindows().length === 0) createWindow();
   });
@@ -1043,6 +1107,7 @@ ipcMain.on('ready', () => {
   sendTabs();
   sendDownloads();
   sendBookmarks();
+  sendBlocked();
 });
 ipcMain.on('zoom', (_e, dir) => {
   const at = activeTab();
@@ -1178,6 +1243,7 @@ ipcMain.handle('settings:set', (_e, patch) => {
   if (patch.accent) broadcastAccent();
   if (typeof patch.doh === 'boolean') applyDoh();
   if (typeof patch.httpsOnly === 'boolean') httpsOnly = next.httpsOnly;
+  if (typeof patch.blockAds === 'boolean') setBlocking(next.blockAds);
   return next;
 });
 

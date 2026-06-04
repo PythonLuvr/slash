@@ -9,6 +9,7 @@
   "author": "EJ Redd",
   "license": "MIT",
   "dependencies": {
+    "@ghostery/adblocker-electron": "^2.18.0",
     "@pythonluvr/squire": "^1.3.0"
   },
   "devDependencies": {
