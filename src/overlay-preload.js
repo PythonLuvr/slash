@@ -14,8 +14,10 @@ contextBridge.exposeInMainWorld('overlay', {
   clearHistory: () => ipcRenderer.send('history:clear'),
   close: () => ipcRenderer.send('pop:close'),
   clearPermission: (origin, perm) => ipcRenderer.send('perm:clear', { origin, perm }),
+  toggleBlocker: () => ipcRenderer.send('blocker:toggle'),
   onShow: (cb) => ipcRenderer.on('pop:show', (_e, kind) => cb(kind)),
   onDownloads: (cb) => ipcRenderer.on('downloads', (_e, list) => cb(list)),
   onHistory: (cb) => ipcRenderer.on('history', (_e, list) => cb(list)),
   onSiteinfo: (cb) => ipcRenderer.on('siteinfo', (_e, data) => cb(data)),
+  onShield: (cb) => ipcRenderer.on('shield', (_e, data) => cb(data)),
 });

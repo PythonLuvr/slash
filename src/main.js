@@ -58,6 +58,7 @@ const POP_SIZES = {
   downloads: { w: 270, h: 230 },
   history: { w: 380, h: 460 },
   siteinfo: { w: 330, h: 264 },
+  shield: { w: 268, h: 150 },
 };
 
 // Top-right cluster popovers anchor right; site-info anchors under the omnibox.
@@ -222,7 +223,10 @@ function onRequestBlocked(request) {
 function sendBlocked() {
   if (!chromeView) return;
   const at = activeTab();
-  chromeView.webContents.send('blocked', at ? at.blocked || 0 : 0);
+  chromeView.webContents.send('blocked', {
+    count: at ? at.blocked || 0 : 0,
+    enabled: readSettings().blockAds,
+  });
 }
 
 function setupPermissions() {
@@ -661,8 +665,17 @@ function showPopover(kind) {
   sendDownloads();
   if (kind === 'history') popoverView.webContents.send('history', store.getHistory().slice(0, 300));
   if (kind === 'siteinfo') sendSiteinfo();
+  if (kind === 'shield') sendShield();
   popoverView.webContents.focus();
   popKind = kind;
+}
+
+function sendShield() {
+  const at = activeTab();
+  popoverView.webContents.send('shield', {
+    count: at ? at.blocked || 0 : 0,
+    enabled: readSettings().blockAds,
+  });
 }
 function hidePopover() {
   if (!popoverView) return;
@@ -1171,6 +1184,15 @@ ipcMain.on('ctx:close', hideContext);
 
 // --- IPC: permission prompt ---
 ipcMain.on('perm:decide', (_e, allow) => decidePermission(allow));
+
+// --- IPC: ad/tracker blocker toggle (from the shield popover) ---
+ipcMain.on('blocker:toggle', () => {
+  const next = !readSettings().blockAds;
+  writeSettings({ blockAds: next });
+  setBlocking(next);
+  if (popKind === 'shield') sendShield();
+  sendBlocked();
+});
 
 // --- IPC: site-info popover (clear a remembered per-site permission) ---
 ipcMain.on('perm:clear', (_e, { origin, perm }) => {

@@ -302,3 +302,69 @@ body {
   background: var(--raised);
   color: var(--ink);
 }
+
+/* Shield (ad/tracker blocking) */
+.sh-count {
+  padding: 6px 10px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.sh-count #sh-num {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.sh-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.sh-toggle:hover {
+  background: var(--raised-2);
+}
+
+.sh-toggle .sw {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: var(--raised-2);
+  transition: background 0.12s ease;
+}
+
+.sh-toggle.on .sw {
+  background: var(--accent);
+}
+
+.sh-toggle .knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--faint);
+  transition: left 0.12s ease, background 0.12s ease;
+}
+
+.sh-toggle.on .knob {
+  left: 18px;
+  background: var(--on-accent);
+}

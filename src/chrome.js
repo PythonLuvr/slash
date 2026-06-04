@@ -11,6 +11,23 @@ home.innerHTML =
   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v9h5v-5h4v5h5v-9"/></svg>';
 home.addEventListener('click', () => window.slash.goHome());
 
+const shield = $('shield');
+const shieldBadge = $('shield-badge');
+shield.querySelector('.sh-ico').innerHTML =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z"/></svg>';
+shield.addEventListener('click', () => window.slash.togglePop('shield'));
+
+// Blocked-count badge for the active tab.
+window.slash.onBlocked(({ count, enabled }) => {
+  shield.classList.toggle('off', !enabled);
+  if (enabled && count > 0) {
+    shieldBadge.textContent = count > 999 ? '999+' : String(count);
+    shieldBadge.classList.remove('hidden');
+  } else {
+    shieldBadge.classList.add('hidden');
+  }
+});
+
 // Neutral site-info icon (sliders / "tune", not a trust-implying padlock) for
 // secure pages; a warning triangle for plain HTTP.
 const ICON_SECURE =

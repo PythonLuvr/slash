@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const KINDS = ['menu', 'profile', 'downloads', 'history', 'siteinfo'];
+const KINDS = ['menu', 'profile', 'downloads', 'history', 'siteinfo', 'shield'];
 
 const hsearch = $('hsearch');
 
@@ -164,3 +164,10 @@ window.overlay.onSiteinfo((data) => {
     wrap.appendChild(row);
   }
 });
+
+// --- Shield (ad/tracker blocking) ---
+window.overlay.onShield((data) => {
+  $('sh-num').textContent = data.count;
+  $('sh-toggle').classList.toggle('on', data.enabled);
+});
+$('sh-toggle').addEventListener('click', () => window.overlay.toggleBlocker());

@@ -29,4 +29,5 @@ contextBridge.exposeInMainWorld('slash', {
   onTabs: (cb) => ipcRenderer.on('tabs', (_e, list) => cb(list)),
   onBookmarks: (cb) => ipcRenderer.on('bookmarks', (_e, list) => cb(list)),
   onFocusOmnibox: (cb) => ipcRenderer.on('focus-omnibox', () => cb()),
+  onBlocked: (cb) => ipcRenderer.on('blocked', (_e, d) => cb(d)),
 });
