@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Slash</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@600;700&display=swap');
+      :root { --accent: #f1cb53; --tile: #1c1c20; --ink: #ededf0; --faint: #66666f; --border: rgba(255,255,255,0.08); }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        background: radial-gradient(circle at 50% 130%, rgba(245,197,24,0.07), transparent 55%), linear-gradient(180deg, #1a1a1d, #111113);
+        color: var(--ink);
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 18px;
+        padding: 26px;
+        -webkit-font-smoothing: antialiased;
+        user-select: none;
+      }
+      .card { background: rgba(255,255,255,0.025); border: 1px solid var(--border); border-radius: 14px; padding: 22px 26px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 18px; min-height: 150px; }
+      .fn { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: var(--faint); }
+      .wm { font-size: 42px; letter-spacing: -1px; display: flex; align-items: baseline; }
+      .sl { color: var(--accent); font-weight: 700; }
+      .lock { display: flex; align-items: center; gap: 14px; }
+      .lock .wm { font-size: 30px; }
+    </style>
+  </head>
+  <body>
+    <div class="card" style="font-family:'Space Grotesk',sans-serif">
+      <div class="fn">Space Grotesk &middot; trailing</div>
+      <div class="wm">slash<span class="sl">/</span></div>
+    </div>
+    <div class="card" style="font-family:'Space Grotesk',sans-serif">
+      <div class="fn">Space Grotesk &middot; leading</div>
+      <div class="wm"><span class="sl">/</span>slash</div>
+    </div>
+    <div class="card" style="font-family:'Space Grotesk',sans-serif">
+      <div class="fn">Space Grotesk &middot; title</div>
+      <div class="wm">Slash<span class="sl">/</span></div>
+    </div>
+
+    <div class="card">
+      <div class="fn">app icon &middot; dark tile</div>
+      <div class="lock">
+        <svg width="46" height="46" viewBox="0 0 46 46"><rect width="46" height="46" rx="13" fill="var(--tile)" stroke="rgba(255,255,255,0.08)"/><line x1="18" y1="33" x2="28" y2="13" stroke="#f1cb53" stroke-width="6" stroke-linecap="round"/></svg>
+        <span class="wm" style="font-family:'Space Grotesk',sans-serif">slash</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="fn">app icon &middot; yellow tile</div>
+      <div class="lock">
+        <svg width="46" height="46" viewBox="0 0 46 46"><rect width="46" height="46" rx="13" fill="#f1cb53"/><line x1="18" y1="33" x2="28" y2="13" stroke="#18181b" stroke-width="6" stroke-linecap="round"/></svg>
+        <span class="wm" style="font-family:'Space Grotesk',sans-serif">Slash</span>
+      </div>
+    </div>
+    <div class="card" style="font-family:'JetBrains Mono',monospace">
+      <div class="fn">JetBrains Mono &middot; terminal</div>
+      <div class="wm">slash<span class="sl">/</span></div>
+    </div>
+  </body>
+</html>

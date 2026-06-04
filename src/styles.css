@@ -1,0 +1,283 @@
+/* Chrome: tab strip + toolbar. Slash conventional layout (Chrome/GX style),
+   governed by the approved mockup. Tabs connect into the toolbar. */
+
+/* --- Tab strip --- */
+#tabstrip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 38px;
+  padding: 0 6px;
+  background: var(--titlebar);
+}
+
+#tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 33px;
+  min-width: 120px;
+  max-width: 220px;
+  padding: 0 9px 0 11px;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: default;
+  flex: 0 1 auto;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tab:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+}
+
+.tab.active {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.tab .favicon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.tab .favicon.fallback {
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.tab .title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab .close {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease, background 0.1s ease, color 0.1s ease;
+}
+
+.tab:hover .close,
+.tab.active .close {
+  opacity: 1;
+}
+
+.tab .close:hover {
+  background: var(--raised-2);
+  color: var(--ink);
+}
+
+#tab-new {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 3px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+#tab-new:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+}
+
+/* --- Toolbar --- */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 56px;
+  padding: 0 12px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.nav:hover:not(:disabled) {
+  background: var(--raised);
+}
+
+.nav:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+#omnibar {
+  flex: 1 1 auto;
+  height: 34px;
+  padding: 0 15px;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background: var(--field);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  outline: none;
+  user-select: text;
+  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+#omnibar:hover {
+  background: var(--raised-2);
+}
+
+#omnibar:focus {
+  background: var(--raised-2);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+#omnibar::placeholder {
+  color: var(--faint);
+}
+
+/* --- Top-right cluster --- */
+.tool {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tool:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+#ai {
+  color: var(--accent);
+}
+
+#ai.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+#profile {
+  padding: 0;
+}
+
+#profile .avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#star.on {
+  color: var(--accent);
+}
+
+/* --- Bookmarks bar --- */
+#bookmarks {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding: 0 8px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#bookmarks::-webkit-scrollbar {
+  display: none;
+}
+
+.bm {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.bm:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.bm img {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.bm-empty {
+  color: var(--faint);
+  font-size: 12px;
+  padding: 0 6px;
+}

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AI affordance options</title>
+    <style>
+      :root { --accent:#f1cb53; --on-accent:#18181b; --accent-soft:rgba(241,203,83,0.16); --ink:#e8e8ec; --muted:#9a9aa3; --faint:#6a6a72; --border:rgba(255,255,255,0.08); --font:'Segoe UI',system-ui,sans-serif; }
+      * { box-sizing:border-box; margin:0; padding:0; }
+      body { font-family:var(--font); background:radial-gradient(circle at 50% 130%, rgba(245,197,24,0.07), transparent 55%), linear-gradient(180deg,#1a1a1d,#111113); color:var(--ink); min-height:100vh; display:grid; grid-template-columns:1fr 1fr; gap:22px; padding:32px; -webkit-font-smoothing:antialiased; user-select:none; }
+      .card { background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:16px; padding:30px 26px; display:flex; flex-direction:column; align-items:center; gap:14px; }
+      .lbl { font-size:11px; text-transform:uppercase; letter-spacing:2px; color:var(--faint); align-self:flex-start; }
+      .box { display:flex; align-items:center; gap:6px; width:100%; height:50px; background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:12px; padding:0 8px 0 14px; }
+      .si { opacity:.6; }
+      .inp { flex:1; color:var(--muted); font-size:14px; padding:0 4px; }
+      .aibtn { width:36px; height:36px; border-radius:9px; background:transparent; color:var(--accent); font-size:17px; display:flex; align-items:center; justify-content:center; border:none; }
+      .pill { display:inline-flex; align-items:center; gap:6px; height:34px; padding:0 12px; border-radius:9px; background:var(--accent-soft); color:var(--accent); font-size:13px; font-weight:600; border:none; }
+      .engines { display:flex; gap:8px; }
+      .echip { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 11px 0 8px; border:1px solid var(--border); border-radius:14px; color:var(--muted); font-size:12px; }
+      .echip.on { border-color:var(--accent); background:var(--accent-soft); color:var(--ink); }
+      .efav { width:15px; height:15px; border-radius:4px; }
+      .toggle { display:inline-flex; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+      .seg { display:inline-flex; align-items:center; gap:6px; padding:7px 14px; font-size:13px; color:var(--muted); cursor:pointer; }
+      .seg.on { background:var(--accent); color:var(--on-accent); font-weight:600; }
+      .bigai { display:inline-flex; align-items:center; gap:8px; padding:9px 18px; border:1px solid var(--accent); border-radius:11px; background:var(--accent-soft); color:var(--accent); font-size:14px; font-weight:600; }
+    </style>
+  </head>
+  <body>
+    <!-- A: current, bare icon -->
+    <div class="card">
+      <div class="lbl">A &middot; current (bare icon)</div>
+      <div class="box"><span class="si">&#128269;</span><span class="inp">Search Google or enter an address</span><span class="aibtn">&#10022;</span></div>
+      <div class="engines"><span class="echip on"><img class="efav" src="https://icons.duckduckgo.com/ip3/google.com.ico">Google</span><span class="echip"><img class="efav" src="https://icons.duckduckgo.com/ip3/duckduckgo.com.ico">DuckDuckGo</span></div>
+    </div>
+
+    <!-- B: labeled pill in box -->
+    <div class="card">
+      <div class="lbl">B &middot; labeled pill</div>
+      <div class="box"><span class="si">&#128269;</span><span class="inp">Search Google or enter an address</span><span class="pill">&#10022; Ask AI</span></div>
+      <div class="engines"><span class="echip on"><img class="efav" src="https://icons.duckduckgo.com/ip3/google.com.ico">Google</span><span class="echip"><img class="efav" src="https://icons.duckduckgo.com/ip3/duckduckgo.com.ico">DuckDuckGo</span></div>
+    </div>
+
+    <!-- C: mode toggle above -->
+    <div class="card">
+      <div class="lbl">C &middot; search / ai mode toggle</div>
+      <div class="toggle"><span class="seg on">&#128269; Search</span><span class="seg">&#10022; Ask AI</span></div>
+      <div class="box"><span class="si">&#128269;</span><span class="inp">Search Google or enter an address</span></div>
+      <div class="engines"><span class="echip on"><img class="efav" src="https://icons.duckduckgo.com/ip3/google.com.ico">Google</span><span class="echip"><img class="efav" src="https://icons.duckduckgo.com/ip3/duckduckgo.com.ico">DuckDuckGo</span></div>
+    </div>
+
+    <!-- D: separate big button below -->
+    <div class="card">
+      <div class="lbl">D &middot; separate button below</div>
+      <div class="box"><span class="si">&#128269;</span><span class="inp">Search Google or enter an address</span></div>
+      <div class="engines"><span class="echip on"><img class="efav" src="https://icons.duckduckgo.com/ip3/google.com.ico">Google</span><span class="echip"><img class="efav" src="https://icons.duckduckgo.com/ip3/duckduckgo.com.ico">DuckDuckGo</span></div>
+      <span class="bigai">&#10022; Ask Slash AI</span>
+    </div>
+  </body>
+</html>

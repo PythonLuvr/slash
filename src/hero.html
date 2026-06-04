@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Loom</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="hero.css" />
+  </head>
+  <body>
+    <main id="dial">
+      <div id="brand"><span class="sl">/</span>slash</div>
+      <div id="searchwrap">
+        <div id="mode-toggle" role="tablist" aria-label="Search or Ask AI">
+          <button id="mode-search" class="seg active" type="button" role="tab" aria-selected="true">&#128269; Search</button>
+          <button id="mode-ai" class="seg" type="button" role="tab" aria-selected="false">&#10022; Ask AI</button>
+        </div>
+        <div id="box">
+          <span class="sicon">&#128269;</span>
+          <input
+            id="input"
+            type="text"
+            placeholder="Search Google or enter an address"
+            spellcheck="false"
+            autocomplete="off"
+            aria-label="Search"
+          />
+        </div>
+        <div id="suggest" class="hidden"></div>
+        <div id="engines" role="tablist" aria-label="Search engines"></div>
+        <div id="models" class="hidden" role="tablist" aria-label="AI models"></div>
+      </div>
+
+      <div id="tiles"></div>
+    </main>
+
+    <div id="addform" class="hidden">
+      <div class="addcard">
+        <div class="addtitle">Add shortcut</div>
+        <input id="add-name" type="text" placeholder="Name" autocomplete="off" />
+        <input id="add-url" type="text" placeholder="example.com" autocomplete="off" />
+        <div class="addrow">
+          <button id="add-cancel" type="button">Cancel</button>
+          <button id="add-save" type="button">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="hero.js"></script>
+  </body>
+</html>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Loom menu</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="overlay.css" />
+  </head>
+  <body>
+    <div id="menu" class="pop hidden" role="menu">
+      <button class="pop-item" data-act="newtab">New tab <kbd>Ctrl+T</kbd></button>
+      <button class="pop-item" data-act="reopen">Reopen closed tab <kbd>Ctrl &#8679; T</kbd></button>
+      <div class="pop-sep"></div>
+      <button class="pop-item" data-act="history">History</button>
+      <button class="pop-item" data-act="find">Find in page <kbd>Ctrl+F</kbd></button>
+      <div class="pop-sep"></div>
+      <button class="pop-item" data-act="zoom-in">Zoom in</button>
+      <button class="pop-item" data-act="zoom-out">Zoom out</button>
+      <button class="pop-item" data-act="zoom-reset">Reset zoom</button>
+      <div class="pop-sep"></div>
+      <button class="pop-item" data-act="ai">AI panel <kbd>Ctrl+J</kbd></button>
+      <button class="pop-item" data-act="settings">Settings &amp; appearance</button>
+    </div>
+
+    <div id="profile" class="pop hidden">
+      <div class="profile-card">
+        <div class="avatar-lg">l</div>
+        <div class="profile-meta">
+          <div class="profile-name">loom</div>
+          <div class="profile-sub">Local profile, on this device</div>
+        </div>
+      </div>
+      <div class="pop-sep"></div>
+      <button class="pop-item" data-act="settings">Customize appearance</button>
+    </div>
+
+    <div id="downloads" class="pop hidden">
+      <div class="pop-head">Downloads</div>
+      <div id="dl-list"></div>
+    </div>
+
+    <div id="history" class="pop hidden">
+      <div class="pop-head">History</div>
+      <input id="hsearch" type="text" placeholder="Search history" spellcheck="false" autocomplete="off" />
+      <div id="hlist"></div>
+      <button id="hclear" type="button">Clear history</button>
+    </div>
+
+    <script src="overlay.js"></script>
+  </body>
+</html>

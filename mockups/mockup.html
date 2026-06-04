@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Slash</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap');
+      :root {
+        --bg: #1c1c1f;
+        --titlebar: #141416;
+        --toolbar: #1c1c1f;
+        --raised: #2a2a2e;
+        --raised-2: #34343a;
+        --ink: #e8e8ec;
+        --muted: #9a9aa3;
+        --faint: #6a6a72;
+        --border: rgba(255, 255, 255, 0.08);
+        --border-strong: rgba(255, 255, 255, 0.14);
+        --accent: #f5c518;
+        --on-accent: #18181b;
+        --accent-soft: rgba(245, 197, 24, 0.16);
+        --radius: 8px;
+        --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        font-family: var(--font);
+        background: var(--bg);
+        color: var(--ink);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+        user-select: none;
+      }
+
+      /* ---- Tab strip ---- */
+      .titlebar { height: 40px; background: var(--titlebar); display: flex; align-items: flex-end; padding: 0 6px; gap: 2px; }
+      .tabs { display: flex; align-items: flex-end; gap: 2px; flex: 1; min-width: 0; }
+      .tab { height: 34px; min-width: 150px; max-width: 220px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 9px 9px 0 0; color: var(--muted); font-size: 12.5px; }
+      .tab:hover { background: rgba(255,255,255,0.05); color: var(--ink); }
+      .tab.active { background: var(--toolbar); color: var(--ink); }
+      .fav { width: 15px; height: 15px; border-radius: 4px; flex: 0 0 auto; object-fit: cover; }
+      .fav.nt { display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 12px; }
+      .tab .ttl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tab .x { width: 18px; height: 18px; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 13px; }
+      .tab .x:hover { background: var(--raised-2); color: var(--ink); }
+      .newtab { width: 28px; height: 28px; margin-bottom: 3px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 18px; }
+      .newtab:hover { background: rgba(255,255,255,0.06); color: var(--ink); }
+      .winctl { display: flex; align-items: center; gap: 2px; margin-bottom: 6px; }
+      .wb { width: 30px; height: 22px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; border-radius: 5px; }
+      .wb:hover { background: rgba(255,255,255,0.07); color: var(--ink); }
+      .wb.close:hover { background: #e8232e; color: #fff; }
+
+      /* ---- Toolbar ---- */
+      .toolbar { height: 46px; background: var(--toolbar); display: flex; align-items: center; gap: 6px; padding: 0 10px; border-bottom: 1px solid var(--border); }
+      .nav { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--ink); font-size: 17px; }
+      .nav:hover { background: var(--raised); }
+      .nav.off { color: var(--faint); }
+      .address { flex: 1; height: 34px; display: flex; align-items: center; gap: 9px; padding: 0 12px; background: var(--raised); border: 1px solid transparent; border-radius: 18px; color: var(--ink); font-size: 13px; }
+      .address:hover { background: var(--raised-2); }
+      .address .site { color: var(--muted); font-size: 13px; }
+      .address .url { flex: 1; color: var(--ink); }
+      .address .url .dim { color: var(--muted); }
+      .address .star { color: var(--muted); font-size: 15px; }
+      .tool { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 16px; }
+      .tool:hover { background: var(--raised); color: var(--ink); }
+      .tool.ai { color: var(--accent); }
+      .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+
+      /* ---- Bookmarks bar ---- */
+      .bookmarks { height: 32px; background: var(--toolbar); display: flex; align-items: center; gap: 4px; padding: 0 10px; border-bottom: 1px solid var(--border); }
+      .bm { display: flex; align-items: center; gap: 7px; padding: 4px 8px; border-radius: 6px; font-size: 12px; color: var(--muted); }
+      .bm:hover { background: var(--raised); color: var(--ink); }
+      .bm .d { width: 14px; height: 14px; border-radius: 4px; object-fit: cover; }
+
+      /* ---- Page: speed dial ---- */
+      .page { flex: 1; background: radial-gradient(circle at 50% 120%, rgba(245,197,24,0.10), transparent 55%), linear-gradient(180deg, #1a1a1d 0%, #111113 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 32px; padding: 40px; }
+      .search { width: min(560px, 80%); height: 50px; display: flex; align-items: center; gap: 12px; padding: 0 18px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 14px; backdrop-filter: blur(10px); color: var(--muted); font-size: 15px; }
+      .brand { font-family: 'Space Grotesk', system-ui, sans-serif; display: flex; align-items: baseline; font-size: 58px; font-weight: 500; letter-spacing: -1.5px; }
+      .brand .sl { color: var(--accent); font-weight: 700; animation: blink 1.1s steps(1) infinite; }
+      .brand .bwm { color: var(--ink); }
+      @keyframes blink { 0%, 55% { opacity: 1; } 55.01%, 100% { opacity: 0; } }
+      .dials { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; width: min(640px, 92%); }
+      .dial { width: 108px; height: 80px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 11px; background: rgba(255,255,255,0.045); border: 1px solid var(--border); border-radius: 14px; }
+      .dial:hover { background: rgba(255,255,255,0.08); }
+      .dial .ic { width: 34px; height: 34px; border-radius: 9px; object-fit: cover; display: flex; align-items: center; justify-content: center; }
+      .dial .ic.add { background: var(--raised-2); color: var(--muted); font-size: 18px; }
+      .dial .nm { font-size: 11.5px; color: var(--muted); }
+
+      .hint { position: fixed; bottom: 14px; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--faint); }
+    </style>
+  </head>
+  <body>
+    <!-- Tab strip -->
+    <div class="titlebar">
+      <div class="tabs">
+        <div class="tab active">
+          <span class="fav nt">&#10022;</span>
+          <span class="ttl">New tab</span>
+          <span class="x">&#10005;</span>
+        </div>
+        <div class="tab">
+          <img class="fav" src="https://icons.duckduckgo.com/ip3/github.com.ico" alt="" />
+          <span class="ttl">samuelmaddock/electron-browser-shell</span>
+          <span class="x">&#10005;</span>
+        </div>
+        <div class="tab">
+          <img class="fav" src="https://icons.duckduckgo.com/ip3/open.spotify.com.ico" alt="" />
+          <span class="ttl">Spotify Web Player</span>
+          <span class="x">&#10005;</span>
+        </div>
+        <div class="newtab">&#43;</div>
+      </div>
+      <div class="winctl">
+        <div class="wb">&#9472;</div>
+        <div class="wb">&#9744;</div>
+        <div class="wb close">&#10005;</div>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="nav">&#8249;</div>
+      <div class="nav off">&#8250;</div>
+      <div class="nav">&#10227;</div>
+      <div class="address">
+        <span class="site">&#128274;</span>
+        <span class="url"><span class="dim">https://</span>github.com<span class="dim">/samuelmaddock/electron-browser-shell</span></span>
+        <span class="star">&#9734;</span>
+      </div>
+      <div class="tool" title="Extensions">&#129513;</div>
+      <div class="tool" title="Downloads">&#8595;</div>
+      <div class="tool ai" title="Ask AI">&#10022;</div>
+      <div class="avatar">S</div>
+      <div class="tool" title="Menu">&#8942;</div>
+    </div>
+
+    <!-- Bookmarks -->
+    <div class="bookmarks">
+      <div class="bm"><img class="d" src="https://icons.duckduckgo.com/ip3/youtube.com.ico" alt="" />YouTube</div>
+      <div class="bm"><img class="d" src="https://icons.duckduckgo.com/ip3/spotify.com.ico" alt="" />Spotify</div>
+      <div class="bm"><img class="d" src="https://icons.duckduckgo.com/ip3/linkedin.com.ico" alt="" />LinkedIn</div>
+      <div class="bm"><img class="d" src="https://icons.duckduckgo.com/ip3/tradingview.com.ico" alt="" />TradingView</div>
+      <div class="bm"><img class="d" src="https://icons.duckduckgo.com/ip3/discord.com.ico" alt="" />Discord</div>
+    </div>
+
+    <!-- Page: speed dial -->
+    <div class="page">
+      <div class="brand"><span class="sl">/</span><span class="bwm">slash</span></div>
+      <div class="search">&#128269;&nbsp; Search the web or enter an address</div>
+      <div class="dials">
+        <div class="dial"><img class="ic" src="https://icons.duckduckgo.com/ip3/youtube.com.ico" alt="" /><span class="nm">YouTube</span></div>
+        <div class="dial"><img class="ic" src="https://icons.duckduckgo.com/ip3/spotify.com.ico" alt="" /><span class="nm">Spotify</span></div>
+        <div class="dial"><img class="ic" src="https://icons.duckduckgo.com/ip3/linkedin.com.ico" alt="" /><span class="nm">LinkedIn</span></div>
+        <div class="dial"><img class="ic" src="https://icons.duckduckgo.com/ip3/tradingview.com.ico" alt="" /><span class="nm">TradingView</span></div>
+        <div class="dial"><img class="ic" src="https://icons.duckduckgo.com/ip3/discord.com.ico" alt="" /><span class="nm">Discord</span></div>
+        <div class="dial"><span class="ic add">&#43;</span><span class="nm">Add</span></div>
+      </div>
+    </div>
+
+    <div class="hint">slash &middot; conventional layout &middot; system font &middot; yellow accent (themeable)</div>
+  </body>
+</html>

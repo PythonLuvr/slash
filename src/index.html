@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Loom</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="tabstrip">
+      <div id="tabs" role="tablist" aria-label="Browser tabs"></div>
+      <button id="tab-new" type="button" aria-label="New tab" title="New tab (Ctrl+T)">&#43;</button>
+    </div>
+
+    <div id="toolbar">
+      <button id="back" class="nav" type="button" aria-label="Back" title="Back">&#8249;</button>
+      <button id="forward" class="nav" type="button" aria-label="Forward" title="Forward">&#8250;</button>
+      <button id="reload" class="nav" type="button" aria-label="Reload" title="Reload">&#10227;</button>
+      <input
+        id="omnibar"
+        type="text"
+        placeholder="Search or enter address"
+        spellcheck="false"
+        autocomplete="off"
+        aria-label="Address and search bar"
+      />
+      <button id="star" class="tool" type="button" aria-label="Bookmark this page" title="Bookmark (Ctrl+D)">&#9734;</button>
+      <button id="downloads" class="tool" type="button" aria-label="Downloads" title="Downloads">&#8595;</button>
+      <button id="ai" class="tool" type="button" aria-label="Toggle AI panel" title="AI panel (Ctrl+J)">&#10022;</button>
+      <button id="profile" class="tool" type="button" aria-label="Profile" title="Profile"><span class="avatar">S</span></button>
+      <button id="menu-btn" class="tool" type="button" aria-label="Menu" title="Menu">&#8942;</button>
+    </div>
+
+    <div id="bookmarks"></div>
+
+    <script src="chrome.js"></script>
+  </body>
+</html>

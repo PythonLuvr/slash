@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Name test, Caret vs Sift</title>
+    <style>
+      :root {
+        --accent: #f1cb53;
+        --tile: #1c1c20;
+        --ink: #ededf0;
+        --muted: #9a9aa3;
+        --faint: #66666f;
+        --border: rgba(255, 255, 255, 0.08);
+        --font: 'Segoe UI', system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: var(--font);
+        background: radial-gradient(circle at 50% 120%, rgba(245,197,24,0.08), transparent 55%), linear-gradient(180deg, #1a1a1d, #111113);
+        color: var(--ink);
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 22px;
+        padding: 34px;
+        -webkit-font-smoothing: antialiased;
+        user-select: none;
+      }
+      .card { background: rgba(255,255,255,0.025); border: 1px solid var(--border); border-radius: 16px; padding: 26px 28px 30px; display: flex; flex-direction: column; align-items: center; gap: 30px; }
+      .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--faint); }
+      .wm { font-weight: 600; letter-spacing: -0.5px; color: var(--ink); }
+      .big { font-size: 40px; }
+      .sm { font-size: 27px; }
+      .lockA { display: flex; align-items: flex-end; gap: 8px; }
+      .us { width: 26px; height: 6px; border-radius: 3px; background: var(--accent); margin-bottom: 7px; }
+      .row { display: flex; align-items: center; gap: 30px; }
+      .lock-icon { display: flex; align-items: center; gap: 13px; }
+    </style>
+  </head>
+  <body>
+    <!-- CARET -->
+    <div class="card">
+      <div class="tag">caret</div>
+      <div class="lockA"><span class="wm big">caret</span><span class="us"></span></div>
+      <div class="row">
+        <div class="lock-icon">
+          <svg width="40" height="40" viewBox="0 0 44 44"><rect width="44" height="44" rx="12" fill="var(--tile)" stroke="rgba(255,255,255,0.08)"/><rect x="12" y="29" width="20" height="5.5" rx="2.75" fill="#f1cb53"/></svg>
+          <span class="wm sm">caret</span>
+        </div>
+        <div class="lock-icon">
+          <svg width="40" height="40" viewBox="0 0 44 44"><rect width="44" height="44" rx="12" fill="#f1cb53"/><rect x="12" y="29" width="20" height="5.5" rx="2.75" fill="#18181b"/></svg>
+          <span class="wm sm">caret</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIFT -->
+    <div class="card">
+      <div class="tag">sift</div>
+      <div class="lockA"><span class="wm big">sift</span><span class="us"></span></div>
+      <div class="row">
+        <div class="lock-icon">
+          <svg width="40" height="40" viewBox="0 0 44 44"><rect width="44" height="44" rx="12" fill="var(--tile)" stroke="rgba(255,255,255,0.08)"/><rect x="12" y="29" width="20" height="5.5" rx="2.75" fill="#f1cb53"/></svg>
+          <span class="wm sm">sift</span>
+        </div>
+        <div class="lock-icon">
+          <svg width="40" height="40" viewBox="0 0 44 44"><rect width="44" height="44" rx="12" fill="#f1cb53"/><rect x="12" y="29" width="20" height="5.5" rx="2.75" fill="#18181b"/></svg>
+          <span class="wm sm">sift</span>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
