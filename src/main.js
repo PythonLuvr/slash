@@ -40,6 +40,7 @@ let popoverView; // top-right menu / profile / downloads / history layer (truste
 let findView; // find-in-page bar (trusted), shown on Ctrl+F
 let ctxView; // right-click context menu layer (trusted)
 let permView; // permission prompt bubble (trusted)
+let interstitialView; // HTTPS-only failure interstitial (trusted, content area)
 let popKind = null; // which popover is open, or null
 let findOpen = false;
 let findText = '';
@@ -47,6 +48,8 @@ let ctxOpen = false;
 let ctxParams = null; // params from the last 'context-menu' event
 let permActive = null; // current { origin, permission, callback }
 const permQueue = []; // pending permission requests
+let httpsOnly = true; // mirrors settings.httpsOnly
+const upgraded = new Map(); // upgraded https url -> original http url
 
 // Popover sizes (the view is sized to the card).
 const POP_SIZES = {
@@ -144,6 +147,30 @@ function permLabel(permission, details) {
     default:
       return 'access ' + permission;
   }
+}
+
+// --- HTTPS-only ---
+// Upgrade top-level http navigations to https. If https then fails, the tab
+// shows an interstitial offering a per-site "continue to HTTP" escape hatch.
+function setupHttpsOnly() {
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*'] }, (details, cb) => {
+    if (!httpsOnly || details.resourceType !== 'mainFrame') return cb({});
+    let host = '';
+    try {
+      host = new URL(details.url).hostname;
+    } catch {
+      return cb({});
+    }
+    // Leave local development alone.
+    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.endsWith('.localhost')) {
+      return cb({});
+    }
+    const origin = originOf(details.url);
+    if (store.isHttpAllowed(origin)) return cb({});
+    const https = details.url.replace(/^http:/i, 'https:');
+    upgraded.set(https, details.url);
+    cb({ redirectURL: https });
+  });
 }
 
 function setupPermissions() {
@@ -263,7 +290,7 @@ async function applyAccent(view) {
   }
 }
 function broadcastAccent() {
-  for (const v of [chromeView, heroView, aiView, popoverView, findView, ctxView, permView]) applyAccent(v);
+  for (const v of [chromeView, heroView, interstitialView, aiView, popoverView, findView, ctxView, permView]) applyAccent(v);
 }
 
 // --- Downloads ---
@@ -345,6 +372,7 @@ function layout() {
   const aiW = aiOpen ? Math.min(AI_WIDTH, Math.floor(width * 0.5)) : 0;
   const mainW = Math.max(0, width - aiW);
   heroView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  if (interstitialView) interstitialView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   for (const t of tabs) t.view.setBounds({ x: 0, y: top, width: mainW, height: ch });
   aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
   if (popKind && popoverView) {
@@ -364,8 +392,21 @@ function layout() {
 
 function updateContentVisibility() {
   const at = activeTab();
-  heroView.setVisible(!!at && at.onHero);
-  for (const t of tabs) t.view.setVisible(!!at && t.id === at.id && !at.onHero);
+  const onInt = !!(at && at.failedHttp);
+  if (interstitialView) {
+    interstitialView.setVisible(onInt);
+    if (onInt) {
+      let host = '';
+      try {
+        host = new URL(at.failedHttp).host;
+      } catch {
+        /* keep blank */
+      }
+      interstitialView.webContents.send('interstitial', { url: at.failedHttp, host });
+    }
+  }
+  heroView.setVisible(!onInt && !!at && at.onHero);
+  for (const t of tabs) t.view.setVisible(!onInt && !!at && t.id === at.id && !at.onHero);
 }
 
 // Keep the toolbar and AI panel above all tab content. Remove-then-add so a
@@ -595,6 +636,7 @@ function createTab(opts = {}) {
     canGoBack: false,
     canGoForward: false,
     loading: false,
+    failedHttp: null, // set when an https upgrade fails (HTTPS-only)
   };
   const wc = view.webContents;
 
@@ -623,7 +665,10 @@ function createTab(opts = {}) {
     sendTabs();
   });
   // History: record on real navigations, update the title when it resolves.
-  wc.on('did-navigate', () => store.addHistory({ url: wc.getURL(), title: wc.getTitle() }));
+  wc.on('did-navigate', () => {
+    upgraded.delete(wc.getURL());
+    store.addHistory({ url: wc.getURL(), title: wc.getTitle() });
+  });
   wc.on('page-title-updated', () => store.addHistory({ url: wc.getURL(), title: wc.getTitle() }));
   // Find-in-page match counts for this tab.
   wc.on('found-in-page', (_e, result) => {
@@ -632,6 +677,26 @@ function createTab(opts = {}) {
         active: result.activeMatchOrdinal,
         total: result.matches,
       });
+    }
+  });
+  // HTTPS-only: a failed upgrade shows the interstitial; any fresh load clears it.
+  wc.on('did-fail-load', (_e, errorCode, _desc, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return; // -3 = ERR_ABORTED
+    const httpUrl = upgraded.get(validatedURL);
+    if (httpUrl) {
+      upgraded.delete(validatedURL);
+      tab.failedHttp = httpUrl;
+      tab.onHero = false;
+      if (id === activeTabId) {
+        updateContentVisibility();
+        sendState();
+      }
+    }
+  });
+  wc.on('did-start-loading', () => {
+    if (tab.failedHttp) {
+      tab.failedHttp = null;
+      if (id === activeTabId) updateContentVisibility();
     }
   });
   // Right-click anywhere in the page opens our custom context menu.
@@ -778,6 +843,13 @@ function createWindow() {
   heroView.webContents.loadFile(path.join(__dirname, 'hero.html'));
   heroView.setVisible(false);
 
+  interstitialView = new WebContentsView({
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'interstitial-preload.js') },
+  });
+  win.contentView.addChildView(interstitialView);
+  interstitialView.webContents.loadFile(path.join(__dirname, 'interstitial.html'));
+  interstitialView.setVisible(false);
+
   aiView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
   });
@@ -821,7 +893,7 @@ function createWindow() {
   permView.webContents.loadFile(path.join(__dirname, 'permission.html'));
   permView.setVisible(false);
 
-  for (const v of [heroView, aiView, chromeView, popoverView, findView, ctxView, permView]) {
+  for (const v of [heroView, interstitialView, aiView, chromeView, popoverView, findView, ctxView, permView]) {
     attachShortcuts(v.webContents);
     v.webContents.on('did-finish-load', () => applyAccent(v));
     // Trusted chrome must never navigate itself or spawn windows. Real web
@@ -922,8 +994,10 @@ async function runApiAI({ conversationId, provider, transcript }, sender) {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   fs.mkdirSync(AI_CWD, { recursive: true });
+  httpsOnly = readSettings().httpsOnly;
   applyDoh();
   setupPermissions();
+  setupHttpsOnly();
   setupDownloads();
   createWindow();
   app.on('activate', () => {
@@ -1039,6 +1113,26 @@ ipcMain.on('perm:clear', (_e, { origin, perm }) => {
   if (popKind === 'siteinfo') sendSiteinfo();
 });
 
+// --- IPC: HTTPS-only interstitial ---
+ipcMain.on('interstitial:continue', () => {
+  const at = activeTab();
+  if (!at || !at.failedHttp) return;
+  const httpUrl = at.failedHttp;
+  store.allowHttp(originOf(httpUrl));
+  at.failedHttp = null;
+  at.onHero = false;
+  at.view.webContents.loadURL(httpUrl);
+  updateContentVisibility();
+});
+ipcMain.on('interstitial:back', () => {
+  const at = activeTab();
+  if (!at) return;
+  at.failedHttp = null;
+  if (at.view.webContents.navigationHistory.canGoBack()) at.view.webContents.navigationHistory.goBack();
+  else goHome();
+  updateContentVisibility();
+});
+
 // --- IPC: history ---
 ipcMain.on('pop:history', () => showPopover('history'));
 ipcMain.on('history:clear', () => {
@@ -1083,6 +1177,7 @@ ipcMain.handle('settings:set', (_e, patch) => {
   const next = writeSettings(patch);
   if (patch.accent) broadcastAccent();
   if (typeof patch.doh === 'boolean') applyDoh();
+  if (typeof patch.httpsOnly === 'boolean') httpsOnly = next.httpsOnly;
   return next;
 });
 

@@ -32,6 +32,7 @@ const DEFAULTS = {
   accent: '#f1cb53', // themeable UI accent (soft yellow default)
   searchEngine: 'duckduckgo', // private search by default
   doh: true, // DNS-over-HTTPS on by default
+  httpsOnly: true, // upgrade http -> https, warn on failure
 };
 
 const ENC_PREFIX = 'enc:v1:';
@@ -97,6 +98,7 @@ function readSettings() {
       accent: parsed.accent || DEFAULTS.accent,
       searchEngine: parsed.searchEngine || DEFAULTS.searchEngine,
       doh: typeof parsed.doh === 'boolean' ? parsed.doh : DEFAULTS.doh,
+      httpsOnly: typeof parsed.httpsOnly === 'boolean' ? parsed.httpsOnly : DEFAULTS.httpsOnly,
     };
   } catch {
     return clone(DEFAULTS);
@@ -112,6 +114,7 @@ function writeSettings(patch) {
     accent: patch.accent || cur.accent,
     searchEngine: patch.searchEngine || cur.searchEngine,
     doh: typeof patch.doh === 'boolean' ? patch.doh : cur.doh,
+    httpsOnly: typeof patch.httpsOnly === 'boolean' ? patch.httpsOnly : cur.httpsOnly,
   };
   // Encrypt keys for disk; the returned object keeps plaintext for the app.
   const onDisk = { ...next, apiKeys: mapKeys(next.apiKeys, encryptKey) };
