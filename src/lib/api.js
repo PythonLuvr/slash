@@ -96,6 +96,94 @@ async function streamGoogle({ apiKey, model, messages, onDelta }) {
   });
 }
 
+// --- Anthropic agent loop (tool use) ---
+// One streaming turn. Accumulates text + tool_use content blocks and the
+// stop reason. Text is streamed live through onDelta.
+async function anthropicTurn({ apiKey, model, system, messages, tools, onDelta }) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({ model, max_tokens: 2048, stream: true, system, messages, tools }),
+  });
+  if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+
+  const blocks = [];
+  let cur = null;
+  let jsonBuf = '';
+  let stopReason = null;
+  await readSSE(res, (data) => {
+    if (data === '[DONE]') return;
+    let evt;
+    try {
+      evt = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (evt.type === 'content_block_start') {
+      cur = { ...evt.content_block };
+      if (cur.type === 'text') cur.text = '';
+      if (cur.type === 'tool_use') jsonBuf = '';
+    } else if (evt.type === 'content_block_delta') {
+      if (evt.delta?.type === 'text_delta') {
+        cur.text += evt.delta.text;
+        onDelta(evt.delta.text);
+      } else if (evt.delta?.type === 'input_json_delta') {
+        jsonBuf += evt.delta.partial_json || '';
+      }
+    } else if (evt.type === 'content_block_stop') {
+      if (cur) {
+        if (cur.type === 'tool_use') {
+          try {
+            cur.input = jsonBuf ? JSON.parse(jsonBuf) : {};
+          } catch {
+            cur.input = {};
+          }
+        }
+        blocks.push(cur);
+        cur = null;
+      }
+    } else if (evt.type === 'message_delta') {
+      if (evt.delta?.stop_reason) stopReason = evt.delta.stop_reason;
+    }
+  });
+  return { blocks, stopReason };
+}
+
+// Run a full tool-use conversation: stream a turn, execute any tools the model
+// asked for, feed the results back, and repeat until it stops calling tools.
+async function runAnthropicAgent({ apiKey, model, system, messages, tools, onDelta, onTool, executeTool }) {
+  const convo = messages.slice();
+  for (let turn = 0; turn < 8; turn++) {
+    const { blocks, stopReason } = await anthropicTurn({ apiKey, model, system, messages: convo, tools, onDelta });
+    const content = blocks.map((b) =>
+      b.type === 'text'
+        ? { type: 'text', text: b.text }
+        : { type: 'tool_use', id: b.id, name: b.name, input: b.input },
+    );
+    convo.push({ role: 'assistant', content: content.length ? content : [{ type: 'text', text: '' }] });
+    if (stopReason !== 'tool_use') break;
+
+    const results = [];
+    for (const b of blocks) {
+      if (b.type !== 'tool_use') continue;
+      if (onTool) onTool({ phase: 'start', name: b.name, input: b.input });
+      let result;
+      try {
+        result = await executeTool(b.name, b.input);
+      } catch (e) {
+        result = 'Tool error: ' + (e && e.message ? e.message : String(e));
+      }
+      if (onTool) onTool({ phase: 'end', name: b.name, result });
+      results.push({ type: 'tool_result', tool_use_id: b.id, content: String(result).slice(0, 12000) });
+    }
+    convo.push({ role: 'user', content: results });
+  }
+}
+
 // kind -> streaming function. kind matches the apiKeys / apiModels keys.
 const STREAMERS = {
   anthropic: streamAnthropic,
@@ -103,4 +191,4 @@ const STREAMERS = {
   google: streamGoogle,
 };
 
-module.exports = { STREAMERS };
+module.exports = { STREAMERS, runAnthropicAgent };

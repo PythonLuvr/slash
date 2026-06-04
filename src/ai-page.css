@@ -429,6 +429,50 @@ body::before {
   margin-bottom: 3px;
 }
 
+.tools {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.tools:empty {
+  display: none;
+}
+
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.tool-chip.done {
+  color: var(--ink);
+}
+
+.tool-chip .tc-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.tool-chip.running .tc-dot {
+  animation: dot-bounce 1.1s infinite ease-in-out both;
+}
+
+.tool-chip.done .tc-dot {
+  background: var(--faint);
+}
+
 .msg .md {
   font-size: 14px;
   line-height: 1.6;

@@ -2,7 +2,7 @@ const { app, BaseWindow, WebContentsView, ipcMain, Menu, session, shell, clipboa
 const path = require('path');
 const fs = require('fs');
 const { readSettings, writeSettings } = require('./lib/settings');
-const { STREAMERS } = require('./lib/api');
+const { STREAMERS, runAnthropicAgent } = require('./lib/api');
 const store = require('./lib/store');
 
 app.setName('Slash');
@@ -287,7 +287,22 @@ const PROVIDERS = {
   claude: {
     label: 'Claude',
     domain: 'claude.ai',
-    cli: { binary: 'claude', adapter: 'claude-code', args: ['-p', '--output-format', 'stream-json', '--verbose'] },
+    cli: {
+      binary: 'claude',
+      adapter: 'claude-code',
+      // Free web access on the user's subscription: only the web tools are
+      // available (no file/terminal access) and pre-approved so nothing prompts.
+      args: [
+        '-p',
+        '--output-format',
+        'stream-json',
+        '--verbose',
+        '--tools',
+        'WebSearch,WebFetch',
+        '--allowedTools',
+        'WebSearch,WebFetch',
+      ],
+    },
     api: { kind: 'anthropic' },
   },
   gemini: {
@@ -306,7 +321,9 @@ const PROVIDERS = {
 
 const SYSTEM =
   'You are Slash, the built-in assistant inside a personal web browser. ' +
-  'Answer conversationally and concisely. Do not use tools or edit files unless explicitly asked.';
+  'Answer conversationally and concisely. You may use web search and fetch ' +
+  'tools to look up current information when it helps. Do not use file, ' +
+  'terminal, or code-editing tools.';
 
 let aiOpen = false;
 
@@ -1065,6 +1082,186 @@ function buildApiMessages(transcript) {
   return msgs;
 }
 
+// --- Agentic web tools (Anthropic API path) ---
+const AGENT_SYSTEM =
+  'You are Slash, the AI built into a web browser. You can act on the web and ' +
+  'control the browser through tools: search the web, read pages, open tabs, ' +
+  'bookmark pages, and add sites to the start page. Use tools when they help ' +
+  'answer or carry out the request; otherwise answer directly. After using ' +
+  'tools, give a clear, concise answer. Do not invent page contents, read them.';
+
+const TOOLS = [
+  {
+    name: 'web_search',
+    description: 'Search the web and get back result titles and URLs.',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'The search query' } },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'read_url',
+    description: 'Load a URL in the background and return the readable text of the page.',
+    input_schema: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'The full URL to read' } },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'read_current_page',
+    description: "Return the readable text of the page in the user's active browser tab.",
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'open_tab',
+    description: 'Open a URL in a new visible browser tab for the user to see.',
+    input_schema: {
+      type: 'object',
+      properties: { url: { type: 'string' } },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'bookmark_page',
+    description: 'Bookmark a page. Uses the active tab if no url is given.',
+    input_schema: {
+      type: 'object',
+      properties: { url: { type: 'string' }, title: { type: 'string' } },
+    },
+  },
+  {
+    name: 'add_to_homepage',
+    description: 'Add a site as a shortcut tile on the start page.',
+    input_schema: {
+      type: 'object',
+      properties: { url: { type: 'string' }, name: { type: 'string' } },
+      required: ['url'],
+    },
+  },
+];
+
+function buildAgentMessages(transcript) {
+  return (transcript || []).map((m) => ({ role: m.role, content: m.text }));
+}
+
+// A reusable offscreen view that renders a page so tools can read JS-rendered
+// content. Calls are serialized through fetcherChain.
+let fetcherView = null;
+let fetcherChain = Promise.resolve();
+function ensureFetcher() {
+  if (fetcherView || !win) return fetcherView;
+  fetcherView = new WebContentsView({ webPreferences: { ...SECURE_PREFS } });
+  win.contentView.addChildView(fetcherView);
+  fetcherView.setBounds({ x: 0, y: 0, width: 1024, height: 768 });
+  fetcherView.setVisible(false);
+  return fetcherView;
+}
+function fetchPageText(url) {
+  const job = () => doFetchPageText(url);
+  fetcherChain = fetcherChain.then(job, job);
+  return fetcherChain;
+}
+async function doFetchPageText(url) {
+  const v = ensureFetcher();
+  if (!v) return { title: '', text: '' };
+  const wc = v.webContents;
+  await new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(to);
+      wc.off('did-finish-load', finish);
+      wc.off('did-fail-load', finish);
+      resolve();
+    };
+    const to = setTimeout(finish, 15000);
+    wc.on('did-finish-load', finish);
+    wc.on('did-fail-load', finish);
+    wc.loadURL(url).catch(finish);
+  });
+  try {
+    const raw = await wc.executeJavaScript(
+      'JSON.stringify({title:document.title||"",text:document.body?document.body.innerText:""})',
+    );
+    return JSON.parse(raw);
+  } catch {
+    return { title: '', text: '' };
+  }
+}
+
+async function toolWebSearch(query) {
+  const res = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query), {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Slash' },
+  });
+  const html = await res.text();
+  const out = [];
+  const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+  let m;
+  while ((m = re.exec(html)) && out.length < 6) {
+    let url = m[1];
+    const uddg = url.match(/[?&]uddg=([^&]+)/);
+    if (uddg) url = decodeURIComponent(uddg[1]);
+    else if (url.startsWith('//')) url = 'https:' + url;
+    const title = m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    if (title && /^https?:/i.test(url)) out.push({ title, url });
+  }
+  if (!out.length) return 'No results found.';
+  return out.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}`).join('\n');
+}
+
+async function executeTool(name, input) {
+  input = input || {};
+  switch (name) {
+    case 'web_search':
+      return toolWebSearch(String(input.query || ''));
+    case 'read_url': {
+      let url = String(input.url || '');
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      const p = await fetchPageText(url);
+      return `# ${p.title}\n${url}\n\n${(p.text || '').slice(0, 6000)}`;
+    }
+    case 'read_current_page': {
+      const at = activeTab();
+      if (!at || at.onHero) return 'No web page is open in the active tab.';
+      const raw = await at.view.webContents.executeJavaScript(
+        'JSON.stringify({title:document.title||"",text:document.body?document.body.innerText:""})',
+      );
+      const p = JSON.parse(raw);
+      return `# ${p.title}\n${at.view.webContents.getURL()}\n\n${(p.text || '').slice(0, 6000)}`;
+    }
+    case 'open_tab': {
+      let url = String(input.url || '');
+      if (!url) return 'No URL given.';
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      createTab({ url, activate: true });
+      return 'Opened ' + url + ' in a new tab.';
+    }
+    case 'bookmark_page': {
+      let url = String(input.url || '');
+      if (!url) {
+        const at = activeTab();
+        url = at && !at.onHero ? at.view.webContents.getURL() : '';
+      }
+      if (!url) return 'No URL to bookmark.';
+      store.addBookmark({ url, title: input.title || url });
+      sendBookmarks();
+      return 'Bookmarked ' + url;
+    }
+    case 'add_to_homepage': {
+      let url = String(input.url || '');
+      if (!url) return 'No URL given.';
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      if (heroView) heroView.webContents.send('hero:add-dial', { name: input.name || '', url });
+      return 'Added ' + url + ' to the start page.';
+    }
+    default:
+      return 'Unknown tool: ' + name;
+  }
+}
+
 function runAI(payload, sender) {
   if (payload.variant === 'api') return runApiAI(payload, sender);
   return runCliAI(payload, sender);
@@ -1116,12 +1313,26 @@ async function runApiAI({ conversationId, provider, transcript }, sender) {
     return;
   }
   try {
-    await STREAMERS[kind]({
-      apiKey,
-      model,
-      messages: buildApiMessages(transcript),
-      onDelta: (delta) => sender.send('ai:delta', { conversationId, delta }),
-    });
+    if (kind === 'anthropic') {
+      // Agentic path: Claude can call browser/web tools and loop on results.
+      await runAnthropicAgent({
+        apiKey,
+        model,
+        system: AGENT_SYSTEM,
+        messages: buildAgentMessages(transcript),
+        tools: TOOLS,
+        onDelta: (delta) => sender.send('ai:delta', { conversationId, delta }),
+        onTool: (ev) => sender.send('ai:tool', { conversationId, ...ev }),
+        executeTool,
+      });
+    } else {
+      await STREAMERS[kind]({
+        apiKey,
+        model,
+        messages: buildApiMessages(transcript),
+        onDelta: (delta) => sender.send('ai:delta', { conversationId, delta }),
+      });
+    }
     sender.send('ai:done', { conversationId, code: 0 });
   } catch (err) {
     sender.send('ai:error', { conversationId, message: err.message });

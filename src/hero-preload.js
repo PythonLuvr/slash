@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('hero', {
   askAI: (text, provider) => ipcRenderer.send('hero:ask-ai', { text, provider }),
   getProviders: () => ipcRenderer.invoke('providers:get'),
   suggest: (q) => ipcRenderer.invoke('suggest:get', q),
+  onAddDial: (cb) => ipcRenderer.on('hero:add-dial', (_e, d) => cb(d)),
 });

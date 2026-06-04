@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('ai', {
   onDelta: (cb) => ipcRenderer.on('ai:delta', (_e, d) => cb(d)),
   onDone: (cb) => ipcRenderer.on('ai:done', (_e, d) => cb(d)),
   onError: (cb) => ipcRenderer.on('ai:error', (_e, d) => cb(d)),
+  onTool: (cb) => ipcRenderer.on('ai:tool', (_e, d) => cb(d)),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   onOpenSettings: (cb) => ipcRenderer.on('open-settings', () => cb()),

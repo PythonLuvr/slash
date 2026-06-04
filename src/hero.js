@@ -331,3 +331,14 @@ renderModels();
 renderTiles();
 input.placeholder = 'Search ' + source.label + ' or enter an address';
 input.focus();
+
+// The AI's add_to_homepage tool drops a shortcut tile here.
+window.hero.onAddDial(({ name, url }) => {
+  if (!url) return;
+  const dials = loadDials();
+  if (!dials.some((d) => d.url === url)) {
+    dials.push({ name: name || domainOf(url), url });
+    saveDials(dials);
+  }
+  renderTiles();
+});
