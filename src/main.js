@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { readSettings, writeSettings } = require('./lib/settings');
 const { STREAMERS, runAnthropicAgent } = require('./lib/api');
+const { startMcpServer } = require('./lib/mcp-server');
 const store = require('./lib/store');
 
 app.setName('Slash');
@@ -287,22 +288,9 @@ const PROVIDERS = {
   claude: {
     label: 'Claude',
     domain: 'claude.ai',
-    cli: {
-      binary: 'claude',
-      adapter: 'claude-code',
-      // Free web access on the user's subscription: only the web tools are
-      // available (no file/terminal access) and pre-approved so nothing prompts.
-      args: [
-        '-p',
-        '--output-format',
-        'stream-json',
-        '--verbose',
-        '--tools',
-        'WebSearch,WebFetch',
-        '--allowedTools',
-        'WebSearch,WebFetch',
-      ],
-    },
+    // Args are built per-call by cliArgsFor() so the MCP browser tools can be
+    // injected once the local MCP server is up.
+    cli: { binary: 'claude', adapter: 'claude-code', args: ['-p', '--output-format', 'stream-json', '--verbose'] },
     api: { kind: 'anthropic' },
   },
   gemini: {
@@ -321,9 +309,10 @@ const PROVIDERS = {
 
 const SYSTEM =
   'You are Slash, the built-in assistant inside a personal web browser. ' +
-  'Answer conversationally and concisely. You may use web search and fetch ' +
-  'tools to look up current information when it helps. Do not use file, ' +
-  'terminal, or code-editing tools.';
+  'Answer conversationally and concisely. You can use your tools to act on the ' +
+  'web and control this browser: search the web, read pages, open tabs, ' +
+  'bookmark pages, and add sites to the start page. Use them when they help. ' +
+  'Do not use file, terminal, or code-editing tools.';
 
 let aiOpen = false;
 
@@ -1267,6 +1256,27 @@ function runAI(payload, sender) {
   return runCliAI(payload, sender);
 }
 
+// --- MCP bridge: lets the free CLIs drive the browser via the local server ---
+let mcpServer = null;
+let mcpConfigPath = null;
+const MCP_SERVER_NAME = 'slash';
+
+// Build CLI args for a provider, injecting the MCP browser tools (and free web
+// search) for Claude once the local MCP server is running.
+function cliArgsFor(provider) {
+  if (provider === 'claude') {
+    const args = ['-p', '--output-format', 'stream-json', '--verbose', '--tools', 'WebSearch,WebFetch'];
+    const allowed = ['WebSearch', 'WebFetch'];
+    if (mcpConfigPath) {
+      args.push('--mcp-config', mcpConfigPath, '--strict-mcp-config');
+      for (const t of TOOLS) allowed.push(`mcp__${MCP_SERVER_NAME}__${t.name}`);
+    }
+    args.push('--allowedTools', allowed.join(','));
+    return args;
+  }
+  return (PROVIDERS[provider] || PROVIDERS.claude).cli.args;
+}
+
 async function runCliAI({ conversationId, provider, transcript }, sender) {
   const cfg = (PROVIDERS[provider] || PROVIDERS.claude).cli;
   let Squire;
@@ -1279,7 +1289,7 @@ async function runCliAI({ conversationId, provider, transcript }, sender) {
   }
   const squire = new Squire({
     binary: cfg.binary,
-    args: cfg.args,
+    args: cliArgsFor(provider),
     adapter: cfg.adapter,
     cwd: AI_CWD,
     timeoutMs: 90000,
@@ -1349,6 +1359,25 @@ app.whenReady().then(() => {
   setupDownloads();
   createWindow();
   setupBlocker();
+
+  // Local MCP server exposing the browser tools, so the free CLIs can drive
+  // the browser. The config (with a per-session token + the chosen port) is
+  // written to userData and referenced by the Claude CLI args.
+  startMcpServer({ name: MCP_SERVER_NAME, tools: TOOLS, executeTool })
+    .then((mcp) => {
+      mcpServer = mcp;
+      const cfg = {
+        mcpServers: {
+          [mcp.name]: { type: 'http', url: mcp.url, headers: { Authorization: 'Bearer ' + mcp.token } },
+        },
+      };
+      const p = path.join(app.getPath('userData'), 'slash-mcp.json');
+      fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf8');
+      mcpConfigPath = p;
+    })
+    .catch(() => {
+      mcpConfigPath = null;
+    });
   app.on('activate', () => {
     if (BaseWindow.getAllWindows().length === 0) createWindow();
   });
