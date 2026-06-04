@@ -41,6 +41,8 @@ let findView; // find-in-page bar (trusted), shown on Ctrl+F
 let ctxView; // right-click context menu layer (trusted)
 let permView; // permission prompt bubble (trusted)
 let interstitialView; // HTTPS-only failure interstitial (trusted, content area)
+let settingsView; // full-page settings surface (trusted, content area)
+let settingsOpen = false;
 let popKind = null; // which popover is open, or null
 let findOpen = false;
 let findText = '';
@@ -346,7 +348,7 @@ async function applyAccent(view) {
   }
 }
 function broadcastAccent() {
-  for (const v of [chromeView, heroView, interstitialView, aiView, popoverView, findView, ctxView, permView]) applyAccent(v);
+  for (const v of [chromeView, heroView, interstitialView, settingsView, aiView, popoverView, findView, ctxView, permView]) applyAccent(v);
 }
 
 // --- Downloads ---
@@ -429,6 +431,7 @@ function layout() {
   const mainW = Math.max(0, width - aiW);
   heroView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   if (interstitialView) interstitialView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  if (settingsView) settingsView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   for (const t of tabs) t.view.setBounds({ x: 0, y: top, width: mainW, height: ch });
   aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
   if (popKind && popoverView) {
@@ -448,7 +451,8 @@ function layout() {
 
 function updateContentVisibility() {
   const at = activeTab();
-  const onInt = !!(at && at.failedHttp);
+  if (settingsView) settingsView.setVisible(settingsOpen);
+  const onInt = !settingsOpen && !!(at && at.failedHttp);
   if (interstitialView) {
     interstitialView.setVisible(onInt);
     if (onInt) {
@@ -461,8 +465,22 @@ function updateContentVisibility() {
       interstitialView.webContents.send('interstitial', { url: at.failedHttp, host });
     }
   }
-  heroView.setVisible(!onInt && !!at && at.onHero);
-  for (const t of tabs) t.view.setVisible(!onInt && !!at && t.id === at.id && !at.onHero);
+  const onContent = settingsOpen || onInt;
+  heroView.setVisible(!onContent && !!at && at.onHero);
+  for (const t of tabs) t.view.setVisible(!onContent && !!at && t.id === at.id && !at.onHero);
+}
+
+function openSettingsPage() {
+  settingsOpen = true;
+  if (settingsView) settingsView.webContents.send('settings:show');
+  updateContentVisibility();
+  if (settingsView) settingsView.webContents.focus();
+}
+
+function closeSettingsPage() {
+  if (!settingsOpen) return;
+  settingsOpen = false;
+  updateContentVisibility();
 }
 
 // Keep the toolbar and AI panel above all tab content. Remove-then-add so a
@@ -806,6 +824,7 @@ function createTab(opts = {}) {
 function activateTab(id) {
   if (!tabs.find((t) => t.id === id)) return;
   activeTabId = id;
+  settingsOpen = false;
   updateContentVisibility();
   sendState();
   sendTabs();
@@ -855,6 +874,7 @@ function goHome() {
   const at = activeTab();
   if (!at) return;
   at.onHero = true;
+  settingsOpen = false;
   updateContentVisibility();
   sendState();
   sendTabs();
@@ -927,6 +947,13 @@ function createWindow() {
   interstitialView.webContents.loadFile(path.join(__dirname, 'interstitial.html'));
   interstitialView.setVisible(false);
 
+  settingsView = new WebContentsView({
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'settings-preload.js') },
+  });
+  win.contentView.addChildView(settingsView);
+  settingsView.webContents.loadFile(path.join(__dirname, 'settings.html'));
+  settingsView.setVisible(false);
+
   aiView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
   });
@@ -970,7 +997,7 @@ function createWindow() {
   permView.webContents.loadFile(path.join(__dirname, 'permission.html'));
   permView.setVisible(false);
 
-  for (const v of [heroView, interstitialView, aiView, chromeView, popoverView, findView, ctxView, permView]) {
+  for (const v of [heroView, interstitialView, settingsView, aiView, chromeView, popoverView, findView, ctxView, permView]) {
     attachShortcuts(v.webContents);
     v.webContents.on('did-finish-load', () => applyAccent(v));
     // Trusted chrome must never navigate itself or spawn windows. Real web
@@ -1092,6 +1119,7 @@ ipcMain.handle('navigate', (_e, input) => {
   const at = activeTab();
   if (url && at) {
     at.onHero = false;
+    settingsOpen = false;
     at.view.webContents.loadURL(url);
     updateContentVisibility();
   }
@@ -1130,6 +1158,13 @@ ipcMain.on('zoom', (_e, dir) => {
   else wc.setZoomLevel(wc.getZoomLevel() + (dir === 'in' ? 0.5 : -0.5));
 });
 ipcMain.on('open-settings', () => {
+  toggleAI(true);
+  aiView.webContents.send('open-settings');
+});
+ipcMain.on('settings:open', openSettingsPage);
+ipcMain.on('settings:close', closeSettingsPage);
+ipcMain.on('settings:open-ai', () => {
+  closeSettingsPage();
   toggleAI(true);
   aiView.webContents.send('open-settings');
 });
@@ -1275,6 +1310,7 @@ ipcMain.on('hero:search', (_e, { engine, query }) => {
   const at = activeTab();
   if (query && query.trim() && at) {
     at.onHero = false;
+    settingsOpen = false;
     at.view.webContents.loadURL(make(query.trim()));
     updateContentVisibility();
   }
@@ -1284,6 +1320,7 @@ ipcMain.on('hero:open', (_e, { url }) => {
   const target = normalizeInput(url);
   if (target && at) {
     at.onHero = false;
+    settingsOpen = false;
     at.view.webContents.loadURL(target);
     updateContentVisibility();
   }

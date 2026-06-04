@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'" />
+    <title>Slash Settings</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <div id="page">
+      <header>
+        <div class="brand"><span class="sl">/</span>settings</div>
+        <button id="close" type="button">Done</button>
+      </header>
+
+      <section>
+        <h2>Search</h2>
+        <div class="row">
+          <div class="label">
+            <div class="name">Default search engine</div>
+            <div class="desc">Used for the address bar and the start page.</div>
+          </div>
+          <div id="engines" class="chips"></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Privacy &amp; security</h2>
+        <div class="row toggle-row" data-key="blockAds">
+          <div class="label">
+            <div class="name">Block ads &amp; trackers</div>
+            <div class="desc">EasyList + EasyPrivacy filter lists, applied in the network layer.</div>
+          </div>
+          <span class="sw" role="switch" tabindex="0"><span class="knob"></span></span>
+        </div>
+        <div class="row toggle-row" data-key="httpsOnly">
+          <div class="label">
+            <div class="name">HTTPS-only mode</div>
+            <div class="desc">Upgrade sites to HTTPS and warn before loading over plain HTTP.</div>
+          </div>
+          <span class="sw" role="switch" tabindex="0"><span class="knob"></span></span>
+        </div>
+        <div class="row toggle-row" data-key="doh">
+          <div class="label">
+            <div class="name">DNS over HTTPS</div>
+            <div class="desc">Encrypt DNS lookups so your network and ISP can't read them. Turn off if a network blocks it.</div>
+          </div>
+          <span class="sw" role="switch" tabindex="0"><span class="knob"></span></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Appearance</h2>
+        <div class="row">
+          <div class="label">
+            <div class="name">Accent color</div>
+            <div class="desc">One restrained accent, used across the UI.</div>
+          </div>
+          <div id="accents" class="accents"></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>AI</h2>
+        <div class="row">
+          <div class="label">
+            <div class="name">AI providers &amp; keys</div>
+            <div class="desc">Choose Claude, Gemini, or ChatGPT, switch between CLI and API, and add your keys.</div>
+          </div>
+          <button id="open-ai" class="btn" type="button">Open AI settings</button>
+        </div>
+      </section>
+    </div>
+    <script src="settings.js"></script>
+  </body>
+</html>

@@ -21,7 +21,7 @@ const ACTIONS = {
   'zoom-out': () => window.overlay.zoom('out'),
   'zoom-reset': () => window.overlay.zoom('reset'),
   ai: () => window.overlay.toggleAI(),
-  settings: () => window.overlay.openSettings(),
+  settings: () => window.overlay.openSettingsPage(),
 };
 
 document.querySelectorAll('.pop-item[data-act]').forEach((btn) => {

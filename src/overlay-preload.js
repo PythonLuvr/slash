@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('overlay', {
   zoom: (dir) => ipcRenderer.send('zoom', dir),
   toggleAI: () => ipcRenderer.send('toggle-ai'),
   openSettings: () => ipcRenderer.send('open-settings'),
+  openSettingsPage: () => ipcRenderer.send('settings:open'),
   openDownload: (id) => ipcRenderer.send('download:open', id),
   openHistory: () => ipcRenderer.send('pop:history'),
   openFind: () => ipcRenderer.send('find:show'),
