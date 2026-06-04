@@ -1,4 +1,4 @@
-// Streaming BYOK API clients for the three providers Loom supports.
+// Streaming BYOK API clients for the three providers Slash supports.
 // Each function streams assistant text back through an onDelta callback,
 // using the user's own API key. No keys, endpoints, or models are baked
 // in beyond public, editable defaults.

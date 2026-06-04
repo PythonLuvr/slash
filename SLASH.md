@@ -56,7 +56,7 @@ chrome matches it.
 
 Electron `BaseWindow` holding stacked `WebContentsView`s (main.js):
 - **chromeView** (`index.html` / `chrome.js` / `styles.css`): tab strip +
-  toolbar + bookmarks bar. Trusted, `preload.js` -> `window.loom`.
+  toolbar + bookmarks bar. Trusted, `preload.js` -> `window.slash`.
 - **heroView** (`hero.*`): the `/slash` speed-dial start page. Shown for any
   tab that has not navigated. Trusted, `hero-preload.js` -> `window.hero`.
 - **per-tab pageViews**: live web content, untrusted, no preload. Tab model in
@@ -84,8 +84,9 @@ via `webContents.insertCSS` (`applyAccent` / `broadcastAccent`).
 
 ## Data + settings (local, never in repo)
 
-- `lib/settings.js` -> `userData/loom-settings.json`: AI selection, BYOK API
-  keys, model ids, **accent**.
+- `lib/settings.js` -> `userData/slash-settings.json`: AI selection, BYOK API
+  keys, model ids, **accent**. Reads the pre-rename `loom-settings.json` as a
+  fallback so old installs keep their keys.
 - `lib/store.js` -> `userData/slash-data.json`: bookmarks + history.
 
 ## Feature status
@@ -98,9 +99,14 @@ downloads (tracked), zoom, top-right cluster (menu/profile/downloads/history),
 bookmarks bar + star (Ctrl+D), find-in-page (Ctrl+F), history popover.
 Accessibility baseline (aria-labels, focus-visible, reduced-motion).
 
-Not done / next (see BROWSER-UI.md): SQLite for history/bookmarks (currently
-JSON), session restore, omnibox security/site-info icon, real extensions,
-context menus, tab groups, the OSS repo rename `loom` -> `slash` + publish.
+Not done / next (see BROWSER-UI.md): right-click context menus, SQLite for
+history/bookmarks (currently JSON), session restore, omnibox security/site-
+info icon, real extensions, tab groups, full settings surface, F11
+fullscreen, then OSS publish to `PythonLuvr/slash`.
+
+The internal `loom` -> `slash` rename is done (bridge `window.slash`,
+`slash-settings.json` with legacy fallback, titles, system prompt, docs); the
+dead GX-red `sidebar.*` files were removed.
 
 ## OSS discipline
 

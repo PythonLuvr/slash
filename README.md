@@ -1,6 +1,6 @@
-# Loom
+# Slash
 
-A small, hackable, AI-native web browser. Loom is a custom shell over
+A small, hackable, AI-native web browser. Slash is a custom shell over
 Chromium (via Electron) with your own UI wrapped around it, and a built-in
 AI panel that talks to Claude, Gemini, or ChatGPT through either their
 CLIs (on your existing subscription) or their APIs (bring your own key).

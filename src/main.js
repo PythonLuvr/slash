@@ -1,4 +1,4 @@
-const { app, BaseWindow, WebContentsView, ipcMain, Menu, session, shell } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain, Menu, session, shell, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { readSettings, writeSettings } = require('./lib/settings');
@@ -15,6 +15,10 @@ const CHROME_HEIGHT = TABSTRIP_HEIGHT + TOOLBAR_HEIGHT + BOOKMARKS_HEIGHT;
 const FIND_W = 360;
 const FIND_HEIGHT = 44;
 const AI_WIDTH = 400;
+const CTX_WIDTH = 244;
+const CTX_ROW = 34; // .pop-item height in context.css
+const CTX_SEP = 11; // .pop-sep height + margins
+const CTX_FRAME = 12; // body padding (5+5) + border (1+1)
 const AI_CWD = path.join(__dirname, '..', '.ai-scratch');
 
 let win;
@@ -23,9 +27,12 @@ let heroView; // shared start page, shown for any tab that has not navigated
 let aiView; // docked AI panel (trusted)
 let popoverView; // top-right menu / profile / downloads / history layer (trusted)
 let findView; // find-in-page bar (trusted), shown on Ctrl+F
+let ctxView; // right-click context menu layer (trusted)
 let popKind = null; // which popover is open, or null
 let findOpen = false;
 let findText = '';
+let ctxOpen = false;
+let ctxParams = null; // params from the last 'context-menu' event
 
 // Popover sizes (the view is sized to the card).
 const POP_SIZES = {
@@ -74,7 +81,7 @@ const PROVIDERS = {
 };
 
 const SYSTEM =
-  'You are Loom, the built-in assistant inside a personal web browser. ' +
+  'You are Slash, the built-in assistant inside a personal web browser. ' +
   'Answer conversationally and concisely. Do not use tools or edit files unless explicitly asked.';
 
 let aiOpen = false;
@@ -118,7 +125,7 @@ async function applyAccent(view) {
   }
 }
 function broadcastAccent() {
-  for (const v of [chromeView, heroView, aiView, popoverView, findView]) applyAccent(v);
+  for (const v of [chromeView, heroView, aiView, popoverView, findView, ctxView]) applyAccent(v);
 }
 
 // --- Downloads ---
@@ -158,7 +165,7 @@ function sendState() {
     mode: onHero ? 'hero' : 'page',
     aiOpen,
     url: at && !onHero ? at.view.webContents.getURL() : '',
-    title: at ? at.title : 'Loom',
+    title: at ? at.title : 'Slash',
     canGoBack: at ? at.canGoBack : false,
     canGoForward: at ? at.canGoForward : false,
     loading: at ? at.loading : false,
@@ -214,7 +221,7 @@ function updateContentVisibility() {
 // Keep the toolbar and AI panel above all tab content. Remove-then-add so a
 // re-stack can never duplicate a child view.
 function raiseChrome() {
-  for (const v of [aiView, chromeView, popoverView, findView]) {
+  for (const v of [aiView, chromeView, popoverView, findView, ctxView]) {
     if (!v) continue;
     win.contentView.removeChildView(v);
     win.contentView.addChildView(v);
@@ -233,6 +240,146 @@ function hideFind() {
   if (findView) findView.setVisible(false);
   const at = activeTab();
   if (at) at.view.webContents.stopFindInPage('clearSelection');
+}
+
+// --- Right-click context menu ---
+// The item list depends on what was clicked (link / image / selection /
+// editable / plain page), built from the Electron `context-menu` params.
+function activePageWc() {
+  const at = activeTab();
+  return at && !at.onHero ? at.view.webContents : null;
+}
+
+function buildContextMenu(p) {
+  const items = [];
+  const has = (s) => typeof s === 'string' && s.length > 0;
+  const wc = activePageWc();
+
+  if (has(p.linkURL)) {
+    items.push({ id: 'open-link', label: 'Open link in new tab' });
+    items.push({ id: 'copy-link', label: 'Copy link address' });
+  }
+  if (p.mediaType === 'image' && has(p.srcURL)) {
+    if (items.length) items.push({ sep: true });
+    items.push({ id: 'open-image', label: 'Open image in new tab' });
+    items.push({ id: 'save-image', label: 'Save image' });
+    items.push({ id: 'copy-image', label: 'Copy image' });
+    items.push({ id: 'copy-image-addr', label: 'Copy image address' });
+  }
+  if (p.isEditable) {
+    if (items.length) items.push({ sep: true });
+    const f = p.editFlags || {};
+    items.push({ id: 'cut', label: 'Cut', kbd: 'Ctrl+X', disabled: !f.canCut });
+    items.push({ id: 'copy', label: 'Copy', kbd: 'Ctrl+C', disabled: !f.canCopy });
+    items.push({ id: 'paste', label: 'Paste', kbd: 'Ctrl+V', disabled: !f.canPaste });
+    items.push({ id: 'select-all', label: 'Select all', kbd: 'Ctrl+A', disabled: !f.canSelectAll });
+  } else if (has(p.selectionText)) {
+    if (items.length) items.push({ sep: true });
+    items.push({ id: 'copy', label: 'Copy', kbd: 'Ctrl+C' });
+    const q = p.selectionText.trim().replace(/\s+/g, ' ');
+    const short = q.length > 24 ? q.slice(0, 24) + '…' : q;
+    items.push({ id: 'search-sel', label: `Search the web for "${short}"` });
+  }
+
+  if (items.length) items.push({ sep: true });
+  items.push({ id: 'back', label: 'Back', disabled: !(wc && wc.navigationHistory.canGoBack()) });
+  items.push({ id: 'forward', label: 'Forward', disabled: !(wc && wc.navigationHistory.canGoForward()) });
+  items.push({ id: 'reload', label: 'Reload', disabled: !wc });
+  items.push({ sep: true });
+  items.push({ id: 'copy-page-url', label: 'Copy page address', disabled: !wc });
+  items.push({ id: 'print', label: 'Print…', disabled: !wc });
+  items.push({ sep: true });
+  items.push({ id: 'view-source', label: 'View page source', disabled: !wc });
+  items.push({ id: 'inspect', label: 'Inspect element', disabled: !wc });
+  return items;
+}
+
+function showContext(params) {
+  if (!ctxView) return;
+  ctxParams = params;
+  const items = buildContextMenu(params);
+  let h = CTX_FRAME;
+  for (const it of items) h += it.sep ? CTX_SEP : CTX_ROW;
+  const { width, height } = win.getContentBounds();
+  // params.x/y are relative to the page view, which sits at (0, CHROME_HEIGHT).
+  let x = Math.max(4, Math.min(params.x, width - CTX_WIDTH - 4));
+  let y = Math.max(CHROME_HEIGHT + 4, Math.min(params.y + CHROME_HEIGHT, height - h - 4));
+  ctxView.setBounds({ x, y, width: CTX_WIDTH, height: h });
+  ctxView.setVisible(true);
+  win.contentView.removeChildView(ctxView);
+  win.contentView.addChildView(ctxView); // keep it topmost
+  ctxView.webContents.send('ctx:items', items);
+  ctxView.webContents.focus();
+  ctxOpen = true;
+}
+
+function hideContext() {
+  if (!ctxView || !ctxOpen) return;
+  ctxView.setVisible(false);
+  ctxOpen = false;
+  ctxParams = null;
+}
+
+function runCtxAction(id) {
+  const p = ctxParams || {};
+  const wc = activePageWc();
+  switch (id) {
+    case 'back':
+      if (wc && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
+      break;
+    case 'forward':
+      if (wc && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
+      break;
+    case 'reload':
+      if (wc) wc.reload();
+      break;
+    case 'open-link':
+      if (p.linkURL) createTab({ url: p.linkURL, activate: true });
+      break;
+    case 'copy-link':
+      if (p.linkURL) clipboard.writeText(p.linkURL);
+      break;
+    case 'open-image':
+      if (p.srcURL) createTab({ url: p.srcURL, activate: true });
+      break;
+    case 'save-image':
+      if (wc && p.srcURL) wc.downloadURL(p.srcURL);
+      break;
+    case 'copy-image':
+      if (wc) wc.copyImageAt(p.x || 0, p.y || 0);
+      break;
+    case 'copy-image-addr':
+      if (p.srcURL) clipboard.writeText(p.srcURL);
+      break;
+    case 'cut':
+      if (wc) wc.cut();
+      break;
+    case 'copy':
+      if (wc) wc.copy();
+      break;
+    case 'paste':
+      if (wc) wc.paste();
+      break;
+    case 'select-all':
+      if (wc) wc.selectAll();
+      break;
+    case 'search-sel':
+      if (p.selectionText) createTab({ url: ENGINES.google(p.selectionText.trim()), activate: true });
+      break;
+    case 'copy-page-url':
+      if (wc) clipboard.writeText(wc.getURL());
+      break;
+    case 'print':
+      if (wc) wc.print();
+      break;
+    case 'view-source':
+      if (wc) createTab({ url: 'view-source:' + wc.getURL(), activate: true });
+      break;
+    case 'inspect':
+      if (wc) wc.inspectElement(p.x || 0, p.y || 0);
+      break;
+  }
+  hideContext();
 }
 
 // --- Bookmarks helpers ---
@@ -315,6 +462,11 @@ function createTab(opts = {}) {
         total: result.matches,
       });
     }
+  });
+  // Right-click anywhere in the page opens our custom context menu.
+  wc.on('context-menu', (_e, params) => {
+    hidePopover();
+    showContext(params);
   });
   // Links that open a new window become new tabs.
   wc.setWindowOpenHandler(({ url }) => {
@@ -483,12 +635,23 @@ function createWindow() {
   findView.webContents.loadFile(path.join(__dirname, 'find.html'));
   findView.setVisible(false);
 
-  for (const v of [heroView, aiView, chromeView, popoverView, findView]) {
+  ctxView = new WebContentsView({
+    webPreferences: { preload: path.join(__dirname, 'context-preload.js') },
+  });
+  win.contentView.addChildView(ctxView);
+  ctxView.webContents.loadFile(path.join(__dirname, 'context.html'));
+  ctxView.setVisible(false);
+  ctxView.webContents.on('blur', hideContext); // close on click-away
+
+  for (const v of [heroView, aiView, chromeView, popoverView, findView, ctxView]) {
     attachShortcuts(v.webContents);
     v.webContents.on('did-finish-load', () => applyAccent(v));
   }
 
-  win.on('resize', layout);
+  win.on('resize', () => {
+    hideContext();
+    layout();
+  });
   layout();
 
   createTab(); // opens on the hero
@@ -678,6 +841,10 @@ ipcMain.on('find:next', (_e, forward) => {
 });
 ipcMain.on('find:close', hideFind);
 ipcMain.on('find:show', showFind);
+
+// --- IPC: context menu ---
+ipcMain.on('ctx:invoke', (_e, id) => runCtxAction(id));
+ipcMain.on('ctx:close', hideContext);
 
 // --- IPC: history ---
 ipcMain.on('pop:history', () => showPopover('history'));

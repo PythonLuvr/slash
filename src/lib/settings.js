@@ -11,6 +11,11 @@ const path = require('path');
 const fs = require('fs');
 
 function settingsPath() {
+  return path.join(app.getPath('userData'), 'slash-settings.json');
+}
+
+// Pre-rename file. Read once for migration so existing keys/accent survive.
+function legacySettingsPath() {
   return path.join(app.getPath('userData'), 'loom-settings.json');
 }
 
@@ -32,7 +37,14 @@ function clone(obj) {
 
 function readSettings() {
   try {
-    const parsed = JSON.parse(fs.readFileSync(settingsPath(), 'utf8'));
+    let raw;
+    try {
+      raw = fs.readFileSync(settingsPath(), 'utf8');
+    } catch {
+      // Fall back to the pre-rename file (loom-settings.json) if present.
+      raw = fs.readFileSync(legacySettingsPath(), 'utf8');
+    }
+    const parsed = JSON.parse(raw);
     return {
       selection: { ...DEFAULTS.selection, ...(parsed.selection || {}) },
       apiKeys: { ...DEFAULTS.apiKeys, ...(parsed.apiKeys || {}) },

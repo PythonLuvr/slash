@@ -16,19 +16,19 @@ omnibar.addEventListener('blur', () => {
 });
 omnibar.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
-    window.loom.navigate(omnibar.value);
+    window.slash.navigate(omnibar.value);
     omnibar.blur();
   }
 });
 
-back.addEventListener('click', () => window.loom.back());
-forward.addEventListener('click', () => window.loom.forward());
+back.addEventListener('click', () => window.slash.back());
+forward.addEventListener('click', () => window.slash.forward());
 reload.addEventListener('click', () => {
-  if (reload.dataset.loading === '1') window.loom.stop();
-  else window.loom.reload();
+  if (reload.dataset.loading === '1') window.slash.stop();
+  else window.slash.reload();
 });
 // --- Tab strip ---
-$('tab-new').addEventListener('click', () => window.loom.newTab());
+$('tab-new').addEventListener('click', () => window.slash.newTab());
 
 function renderTabs(list) {
   tabsEl.innerHTML = '';
@@ -65,16 +65,16 @@ function renderTabs(list) {
     close.innerHTML = '&#10005;';
     close.addEventListener('click', (e) => {
       e.stopPropagation();
-      window.loom.closeTab(t.id);
+      window.slash.closeTab(t.id);
     });
     tab.appendChild(close);
 
-    tab.addEventListener('click', () => window.loom.activateTab(t.id));
+    tab.addEventListener('click', () => window.slash.activateTab(t.id));
     // middle-click closes
     tab.addEventListener('auxclick', (e) => {
       if (e.button === 1) {
         e.preventDefault();
-        window.loom.closeTab(t.id);
+        window.slash.closeTab(t.id);
       }
     });
     tabsEl.appendChild(tab);
@@ -88,7 +88,7 @@ function fallbackIcon() {
 }
 
 // --- State ---
-window.loom.onState((s) => {
+window.slash.onState((s) => {
   if (!omnibarFocused) omnibar.value = s.url || '';
   if (s.mode === 'hero') {
     omnibar.placeholder = 'Search or enter address';
@@ -141,29 +141,29 @@ function renderBookmarks(list) {
     const t = document.createElement('span');
     t.textContent = b.title || dom || b.url;
     item.appendChild(t);
-    item.addEventListener('click', () => window.loom.openUrl(b.url));
+    item.addEventListener('click', () => window.slash.openUrl(b.url));
     item.addEventListener('auxclick', (e) => {
       if (e.button === 1) {
         e.preventDefault();
-        window.loom.removeBookmark(b.url);
+        window.slash.removeBookmark(b.url);
       }
     });
     bar.appendChild(item);
   }
 }
-window.loom.onBookmarks(renderBookmarks);
+window.slash.onBookmarks(renderBookmarks);
 
-window.loom.onTabs(renderTabs);
-window.loom.onFocusOmnibox(() => {
+window.slash.onTabs(renderTabs);
+window.slash.onFocusOmnibox(() => {
   omnibar.focus();
   omnibar.select();
 });
 
 // --- Top-right cluster ---
-$('star').addEventListener('click', () => window.loom.toggleBookmark());
-$('ai').addEventListener('click', () => window.loom.toggleAI());
-$('menu-btn').addEventListener('click', () => window.loom.togglePop('menu'));
-$('profile').addEventListener('click', () => window.loom.togglePop('profile'));
-$('downloads').addEventListener('click', () => window.loom.togglePop('downloads'));
+$('star').addEventListener('click', () => window.slash.toggleBookmark());
+$('ai').addEventListener('click', () => window.slash.toggleAI());
+$('menu-btn').addEventListener('click', () => window.slash.togglePop('menu'));
+$('profile').addEventListener('click', () => window.slash.togglePop('profile'));
+$('downloads').addEventListener('click', () => window.slash.togglePop('downloads'));
 
-window.loom.ready();
+window.slash.ready();

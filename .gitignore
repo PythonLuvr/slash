@@ -6,6 +6,7 @@ out/
 .ai-scratch/
 
 # Local per-user settings (holds BYOK API keys). Never commit.
+slash-settings.json
 loom-settings.json
 
 *.log

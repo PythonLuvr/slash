@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 // The only surface our chrome UI (tab strip + toolbar) can touch in main.
-contextBridge.exposeInMainWorld('loom', {
+contextBridge.exposeInMainWorld('slash', {
   // navigation
   navigate: (input) => ipcRenderer.invoke('navigate', input),
   back: () => ipcRenderer.send('back'),
