@@ -332,6 +332,16 @@ renderTiles();
 input.placeholder = 'Search ' + source.label + ' or enter an address';
 input.focus();
 
+// First-run prompt: ask new users to set Slash as the default browser. The
+// choice is saved by main so this only ever shows once.
+window.hero.onFirstRun(() => $('firstrun').classList.remove('hidden'));
+function closeFirstRun(setDefault) {
+  $('firstrun').classList.add('hidden');
+  window.hero.firstRunChoice(setDefault);
+}
+$('fr-set').addEventListener('click', () => closeFirstRun(true));
+$('fr-later').addEventListener('click', () => closeFirstRun(false));
+
 // The AI's add_to_homepage tool drops a shortcut tile here.
 window.hero.onAddDial(({ name, url }) => {
   if (!url) return;

@@ -991,6 +991,7 @@ function createWindow() {
   win.contentView.addChildView(heroView);
   heroView.webContents.loadFile(path.join(__dirname, 'hero.html'));
   heroView.setVisible(false);
+  heroView.webContents.once('did-finish-load', maybeShowFirstRun);
 
   interstitialView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'interstitial-preload.js') },
@@ -1613,6 +1614,25 @@ ipcMain.on('ai:to-sidebar', (_e, data) => {
   sendTabs();
   toggleAI(true);
   aiView.webContents.send('ai:load', data);
+});
+
+// --- First-run "set as default" prompt (shown once to new users) ---
+function maybeShowFirstRun() {
+  const s = readSettings();
+  if (s.seenDefaultPrompt) return;
+  if (app.isDefaultProtocolClient('http')) {
+    writeSettings({ seenDefaultPrompt: true });
+    return;
+  }
+  if (heroView) heroView.webContents.send('hero:first-run');
+}
+ipcMain.on('firstrun:choice', (_e, setDefault) => {
+  if (setDefault) {
+    app.setAsDefaultProtocolClient('http');
+    app.setAsDefaultProtocolClient('https');
+    if (process.platform === 'win32') shell.openExternal('ms-settings:defaultapps').catch(() => {});
+  }
+  writeSettings({ seenDefaultPrompt: true });
 });
 
 // --- IPC: default browser ---
