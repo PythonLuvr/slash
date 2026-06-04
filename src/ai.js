@@ -25,6 +25,11 @@ function providerLogo(p) {
 const input = $('input');
 const thread = $('thread');
 
+// This same UI runs as the docked sidebar and as the full-screen slash://ai
+// page (loaded with #full). The mode changes layout + which expand/dock
+// button is shown.
+const FULL = location.hash === '#full';
+
 let settings = null;
 let selection = { provider: 'claude', variant: 'cli' };
 const conversationId = 'c' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
@@ -300,6 +305,37 @@ window.ai.onDone((d) => {
 });
 
 window.ai.onOpenSettings(() => openSettings());
+
+// --- Sidebar <-> full-screen handoff ---
+function snapshot() {
+  return { transcript, selection };
+}
+function loadConversation(data) {
+  if (data && data.selection) {
+    selection = data.selection;
+    window.ai.saveSettings({ selection });
+    updatePickerLabel();
+  }
+  transcript = data && Array.isArray(data.transcript) ? data.transcript.slice() : [];
+  thread.innerHTML = '';
+  if (transcript.length) {
+    $('empty').classList.add('hidden');
+    for (const m of transcript) appendMessage(m.role, m.text);
+  } else {
+    $('empty').classList.remove('hidden');
+  }
+}
+window.ai.onLoad(loadConversation);
+
+// Expand (docked -> full page) and dock (full page -> sidebar), carrying the
+// conversation across so it stays continuous.
+if (FULL) {
+  document.body.classList.add('full');
+  $('expand').classList.add('hidden');
+  $('dock').classList.remove('hidden');
+}
+$('expand').addEventListener('click', () => window.ai.toPage(snapshot()));
+$('dock').addEventListener('click', () => window.ai.toSidebar(snapshot()));
 
 // A prompt handed over from the hero's Ask AI mode: set the chosen model,
 // drop the text in, and send.

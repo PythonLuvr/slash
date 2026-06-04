@@ -136,7 +136,7 @@ window.slash.onState((s) => {
   const star = $('star');
   star.innerHTML = s.bookmarked ? '&#9733;' : '&#9734;';
   star.classList.toggle('on', !!s.bookmarked);
-  star.disabled = s.mode === 'hero';
+  star.disabled = s.mode !== 'page';
   home.classList.toggle('active', s.mode === 'hero');
 
   // Site-info button: hidden on the start page, sliders icon on https, warning

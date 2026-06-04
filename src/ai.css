@@ -82,6 +82,51 @@ body {
   color: var(--ink);
 }
 
+#expand,
+#dock {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+#expand:hover,
+#dock:hover {
+  background: var(--raised-2);
+  color: var(--ink);
+}
+
+/* Full-screen mode (the slash://ai page): a centered, readable column. */
+body.full {
+  background: var(--paper);
+  border-left: none;
+}
+
+body.full #header,
+body.full #chat,
+body.full #settings {
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+}
+
+body.full #header {
+  padding: 0 24px;
+  height: 56px;
+}
+
+body.full #composer {
+  padding-bottom: 18px;
+}
+
 /* --- Picker menu --- */
 #picker-menu {
   position: absolute;

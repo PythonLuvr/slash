@@ -36,6 +36,7 @@ let win;
 let chromeView; // tab strip + toolbar + bookmarks (trusted)
 let heroView; // shared start page, shown for any tab that has not navigated
 let aiView; // docked AI panel (trusted)
+let aiPageView; // full-screen slash://ai conversation (trusted, content area)
 let popoverView; // top-right menu / profile / downloads / history layer (trusted)
 let findView; // find-in-page bar (trusted), shown on Ctrl+F
 let ctxView; // right-click context menu layer (trusted)
@@ -317,6 +318,11 @@ function normalizeInput(input) {
   return searchURL(text);
 }
 
+// The internal address for the full-screen AI page.
+function isAIAddress(input) {
+  return /^\s*slash:(\/\/)?ai\/?\s*$/i.test(input || '');
+}
+
 // --- Themeable accent: inject the user's accent into every chrome view ---
 function hexToRgb(hex) {
   const m = (hex || '').replace('#', '');
@@ -348,7 +354,7 @@ async function applyAccent(view) {
   }
 }
 function broadcastAccent() {
-  for (const v of [chromeView, heroView, interstitialView, settingsView, aiView, popoverView, findView, ctxView, permView]) applyAccent(v);
+  for (const v of [chromeView, heroView, interstitialView, settingsView, aiPageView, aiView, popoverView, findView, ctxView, permView]) applyAccent(v);
 }
 
 // --- Downloads ---
@@ -394,16 +400,18 @@ function sendState() {
   if (!chromeView) return;
   const at = activeTab();
   const onHero = !!(at && at.onHero);
+  const onAIPage = !!(at && at.onAIPage);
+  const realPage = at && !onHero && !onAIPage;
   chromeView.webContents.send('state', {
-    mode: onHero ? 'hero' : 'page',
+    mode: onAIPage ? 'aipage' : onHero ? 'hero' : 'page',
     aiOpen,
-    url: at && !onHero ? at.view.webContents.getURL() : '',
-    title: at ? at.title : 'Slash',
+    url: onAIPage ? 'slash://ai' : realPage ? at.view.webContents.getURL() : '',
+    title: onAIPage ? 'Slash AI' : at ? at.title : 'Slash',
     canGoBack: at ? at.canGoBack : false,
     canGoForward: at ? at.canGoForward : false,
     loading: at ? at.loading : false,
-    bookmarked: at && !onHero ? store.isBookmarked(at.view.webContents.getURL()) : false,
-    security: securityOf(at),
+    bookmarked: realPage ? store.isBookmarked(at.view.webContents.getURL()) : false,
+    security: onAIPage ? 'internal' : securityOf(at),
   });
 }
 
@@ -432,6 +440,7 @@ function layout() {
   heroView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   if (interstitialView) interstitialView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   if (settingsView) settingsView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  if (aiPageView) aiPageView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   for (const t of tabs) t.view.setBounds({ x: 0, y: top, width: mainW, height: ch });
   aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
   if (popKind && popoverView) {
@@ -465,9 +474,25 @@ function updateContentVisibility() {
       interstitialView.webContents.send('interstitial', { url: at.failedHttp, host });
     }
   }
-  const onContent = settingsOpen || onInt;
+  const onAIPage = !settingsOpen && !onInt && !!(at && at.onAIPage);
+  if (aiPageView) aiPageView.setVisible(onAIPage);
+  const onContent = settingsOpen || onInt || onAIPage;
   heroView.setVisible(!onContent && !!at && at.onHero);
   for (const t of tabs) t.view.setVisible(!onContent && !!at && t.id === at.id && !at.onHero);
+}
+
+function goAIPage(opts = {}) {
+  const at = activeTab();
+  if (!at) return;
+  at.onAIPage = true;
+  at.onHero = false;
+  settingsOpen = false;
+  updateContentVisibility();
+  sendState();
+  sendTabs();
+  if (opts.prompt) aiPageView.webContents.send('ai:prompt', opts.prompt);
+  if (opts.load) aiPageView.webContents.send('ai:load', opts.load);
+  aiPageView.webContents.focus();
 }
 
 function openSettingsPage() {
@@ -721,6 +746,7 @@ function createTab(opts = {}) {
     loading: false,
     failedHttp: null, // set when an https upgrade fails (HTTPS-only)
     blocked: 0, // ads/trackers blocked on the current page
+    onAIPage: false, // showing the full-screen slash://ai page
   };
   const wc = view.webContents;
 
@@ -874,6 +900,7 @@ function goHome() {
   const at = activeTab();
   if (!at) return;
   at.onHero = true;
+  at.onAIPage = false;
   settingsOpen = false;
   updateContentVisibility();
   sendState();
@@ -954,6 +981,13 @@ function createWindow() {
   settingsView.webContents.loadFile(path.join(__dirname, 'settings.html'));
   settingsView.setVisible(false);
 
+  aiPageView = new WebContentsView({
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
+  });
+  win.contentView.addChildView(aiPageView);
+  aiPageView.webContents.loadFile(path.join(__dirname, 'ai-page.html'));
+  aiPageView.setVisible(false);
+
   aiView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
   });
@@ -997,7 +1031,7 @@ function createWindow() {
   permView.webContents.loadFile(path.join(__dirname, 'permission.html'));
   permView.setVisible(false);
 
-  for (const v of [heroView, interstitialView, settingsView, aiView, chromeView, popoverView, findView, ctxView, permView]) {
+  for (const v of [heroView, interstitialView, settingsView, aiPageView, aiView, chromeView, popoverView, findView, ctxView, permView]) {
     attachShortcuts(v.webContents);
     v.webContents.on('did-finish-load', () => applyAccent(v));
     // Trusted chrome must never navigate itself or spawn windows. Real web
@@ -1115,10 +1149,15 @@ app.on('window-all-closed', () => {
 
 // --- IPC: navigation (acts on the active tab) ---
 ipcMain.handle('navigate', (_e, input) => {
+  if (isAIAddress(input)) {
+    goAIPage();
+    return 'slash://ai';
+  }
   const url = normalizeInput(input);
   const at = activeTab();
   if (url && at) {
     at.onHero = false;
+    at.onAIPage = false;
     settingsOpen = false;
     at.view.webContents.loadURL(url);
     updateContentVisibility();
@@ -1293,6 +1332,24 @@ ipcMain.on('toggle-ai', () => toggleAI());
 ipcMain.on('open-ai', () => toggleAI(true));
 ipcMain.on('ai:send', (e, payload) => runAI(payload, e.sender));
 
+// Handoff between the docked sidebar and the full-screen slash://ai page.
+ipcMain.on('ai:to-page', (_e, data) => {
+  toggleAI(false); // close the docked sidebar
+  goAIPage({ load: data });
+});
+ipcMain.on('ai:to-sidebar', (_e, data) => {
+  const at = activeTab();
+  if (at) {
+    at.onAIPage = false;
+    if (!at.view.webContents.getURL()) at.onHero = true;
+  }
+  updateContentVisibility();
+  sendState();
+  sendTabs();
+  toggleAI(true);
+  aiView.webContents.send('ai:load', data);
+});
+
 // --- IPC: settings ---
 ipcMain.handle('settings:get', () => readSettings());
 ipcMain.handle('settings:set', (_e, patch) => {
@@ -1310,6 +1367,7 @@ ipcMain.on('hero:search', (_e, { engine, query }) => {
   const at = activeTab();
   if (query && query.trim() && at) {
     at.onHero = false;
+    at.onAIPage = false;
     settingsOpen = false;
     at.view.webContents.loadURL(make(query.trim()));
     updateContentVisibility();
@@ -1320,6 +1378,7 @@ ipcMain.on('hero:open', (_e, { url }) => {
   const target = normalizeInput(url);
   if (target && at) {
     at.onHero = false;
+    at.onAIPage = false;
     settingsOpen = false;
     at.view.webContents.loadURL(target);
     updateContentVisibility();
@@ -1328,8 +1387,6 @@ ipcMain.on('hero:open', (_e, { url }) => {
 // From the hero's "Ask AI" mode: open the panel, set the chosen model, and
 // send the prompt into it.
 ipcMain.on('hero:ask-ai', (_e, { text, provider }) => {
-  toggleAI(true);
-  if (text && text.trim()) {
-    aiView.webContents.send('ai:prompt', { text: text.trim(), provider });
-  }
+  const t = (text || '').trim();
+  goAIPage(t ? { prompt: { text: t, provider } } : {});
 });

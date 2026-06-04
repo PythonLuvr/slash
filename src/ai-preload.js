@@ -11,4 +11,8 @@ contextBridge.exposeInMainWorld('ai', {
   saveSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   onOpenSettings: (cb) => ipcRenderer.on('open-settings', () => cb()),
   onPrompt: (cb) => ipcRenderer.on('ai:prompt', (_e, text) => cb(text)),
+  // Handoff between the docked sidebar and the full-screen slash://ai page.
+  toPage: (data) => ipcRenderer.send('ai:to-page', data),
+  toSidebar: (data) => ipcRenderer.send('ai:to-sidebar', data),
+  onLoad: (cb) => ipcRenderer.on('ai:load', (_e, d) => cb(d)),
 });
