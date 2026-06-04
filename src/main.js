@@ -19,6 +19,8 @@ const CTX_WIDTH = 244;
 const CTX_ROW = 34; // .pop-item height in context.css
 const CTX_SEP = 11; // .pop-sep height + margins
 const CTX_FRAME = 12; // body padding (5+5) + border (1+1)
+const PERM_W = 420;
+const PERM_H = 104; // permission prompt bubble
 
 // Hardened defaults for every view. Trusted views add their own preload on
 // top; the untrusted page views get exactly this and no preload.
@@ -37,11 +39,14 @@ let aiView; // docked AI panel (trusted)
 let popoverView; // top-right menu / profile / downloads / history layer (trusted)
 let findView; // find-in-page bar (trusted), shown on Ctrl+F
 let ctxView; // right-click context menu layer (trusted)
+let permView; // permission prompt bubble (trusted)
 let popKind = null; // which popover is open, or null
 let findOpen = false;
 let findText = '';
 let ctxOpen = false;
 let ctxParams = null; // params from the last 'context-menu' event
+let permActive = null; // current { origin, permission, callback }
+const permQueue = []; // pending permission requests
 
 // Popover sizes (the view is sized to the card).
 const POP_SIZES = {
@@ -49,7 +54,14 @@ const POP_SIZES = {
   profile: { w: 250, h: 132 },
   downloads: { w: 270, h: 230 },
   history: { w: 380, h: 460 },
+  siteinfo: { w: 330, h: 264 },
 };
+
+// Top-right cluster popovers anchor right; site-info anchors under the omnibox.
+function popoverPos(kind, s, width) {
+  const x = kind === 'siteinfo' ? 12 : Math.max(0, width - s.w - 10);
+  return { x, y: CHROME_HEIGHT };
+}
 
 // Tab model. Each tab owns a WebContentsView (untrusted web content). A tab
 // with `onHero: true` shows the shared heroView instead of its own page.
@@ -94,6 +106,95 @@ function applyDoh() {
   } catch {
     /* host resolver config unsupported on this platform */
   }
+}
+
+function originOf(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+// --- Per-site permissions ---
+// Privacy-sensitive permissions are prompted and remembered per origin;
+// everything else (fullscreen, pointer lock, etc.) is allowed silently.
+const PROMPTABLE = new Set(['media', 'geolocation', 'notifications', 'clipboard-read', 'midi', 'midiSysex']);
+
+function permLabel(permission, details) {
+  switch (permission) {
+    case 'media': {
+      const t = (details && details.mediaTypes) || [];
+      const cam = t.includes('video');
+      const mic = t.includes('audio');
+      if (cam && mic) return 'use your camera and microphone';
+      if (cam) return 'use your camera';
+      if (mic) return 'use your microphone';
+      return 'use your camera and microphone';
+    }
+    case 'geolocation':
+      return 'know your location';
+    case 'notifications':
+      return 'show notifications';
+    case 'clipboard-read':
+      return 'read your clipboard';
+    case 'midi':
+    case 'midiSysex':
+      return 'use your MIDI devices';
+    default:
+      return 'access ' + permission;
+  }
+}
+
+function setupPermissions() {
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+    if (!PROMPTABLE.has(permission)) return callback(true);
+    const origin = originOf((details && details.requestingUrl) || (wc && wc.getURL()));
+    if (!origin) return callback(false);
+    const decided = store.getPermission(origin, permission);
+    if (decided === 'allow') return callback(true);
+    if (decided === 'block') return callback(false);
+    enqueuePermission({ origin, permission, label: permLabel(permission, details), callback });
+  });
+  ses.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
+    if (!PROMPTABLE.has(permission)) return true;
+    return store.getPermission(requestingOrigin, permission) === 'allow';
+  });
+}
+
+function enqueuePermission(req) {
+  permQueue.push(req);
+  if (!permActive) showNextPermission();
+}
+
+function showNextPermission() {
+  permActive = permQueue.shift() || null;
+  if (!permActive) {
+    if (permView) permView.setVisible(false);
+    return;
+  }
+  if (!permView) return;
+  const { width } = win.getContentBounds();
+  permView.setBounds({ x: 12, y: CHROME_HEIGHT + 6, width: Math.min(PERM_W, width - 24), height: PERM_H });
+  permView.setVisible(true);
+  win.contentView.removeChildView(permView);
+  win.contentView.addChildView(permView); // topmost
+  permView.webContents.send('perm:show', { origin: permActive.origin, action: permActive.label });
+  permView.webContents.focus();
+}
+
+function decidePermission(allow) {
+  if (!permActive) return;
+  const { origin, permission, callback } = permActive;
+  store.setPermission(origin, permission, allow ? 'allow' : 'block');
+  try {
+    callback(!!allow);
+  } catch {
+    /* request already gone */
+  }
+  permActive = null;
+  showNextPermission();
 }
 
 const PROVIDERS = {
@@ -162,7 +263,7 @@ async function applyAccent(view) {
   }
 }
 function broadcastAccent() {
-  for (const v of [chromeView, heroView, aiView, popoverView, findView, ctxView]) applyAccent(v);
+  for (const v of [chromeView, heroView, aiView, popoverView, findView, ctxView, permView]) applyAccent(v);
 }
 
 // --- Downloads ---
@@ -193,6 +294,16 @@ function setupDownloads() {
   });
 }
 
+// Connection state for the site-info button: secure (https), insecure (http),
+// or internal (the start page and file:/view-source: pages).
+function securityOf(at) {
+  if (!at || at.onHero) return 'internal';
+  const url = at.view.webContents.getURL();
+  if (/^https:/i.test(url)) return 'secure';
+  if (/^http:/i.test(url)) return 'insecure';
+  return 'internal';
+}
+
 // --- State to the chrome UI ---
 function sendState() {
   if (!chromeView) return;
@@ -207,6 +318,7 @@ function sendState() {
     canGoForward: at ? at.canGoForward : false,
     loading: at ? at.loading : false,
     bookmarked: at && !onHero ? store.isBookmarked(at.view.webContents.getURL()) : false,
+    security: securityOf(at),
   });
 }
 
@@ -237,7 +349,8 @@ function layout() {
   aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
   if (popKind && popoverView) {
     const s = POP_SIZES[popKind];
-    popoverView.setBounds({ x: Math.max(0, width - s.w - 10), y: CHROME_HEIGHT, width: s.w, height: s.h });
+    const { x, y } = popoverPos(popKind, s, width);
+    popoverView.setBounds({ x, y, width: s.w, height: s.h });
   }
   if (findOpen && findView) {
     findView.setBounds({
@@ -258,7 +371,7 @@ function updateContentVisibility() {
 // Keep the toolbar and AI panel above all tab content. Remove-then-add so a
 // re-stack can never duplicate a child view.
 function raiseChrome() {
-  for (const v of [aiView, chromeView, popoverView, findView, ctxView]) {
+  for (const v of [aiView, chromeView, popoverView, findView, ctxView, permView]) {
     if (!v) continue;
     win.contentView.removeChildView(v);
     win.contentView.addChildView(v);
@@ -425,15 +538,36 @@ function sendBookmarks() {
 }
 
 // --- Top-right popovers ---
+function sendSiteinfo() {
+  const at = activeTab();
+  const url = at && !at.onHero ? at.view.webContents.getURL() : '';
+  let host = '';
+  try {
+    host = new URL(url).host;
+  } catch {
+    /* internal page */
+  }
+  const origin = originOf(url);
+  const perms = origin ? store.getSitePermissions(origin) : {};
+  popoverView.webContents.send('siteinfo', {
+    secure: securityOf(at),
+    host,
+    origin: origin || '',
+    permissions: Object.entries(perms).map(([perm, decision]) => ({ perm, decision })),
+  });
+}
+
 function showPopover(kind) {
   const s = POP_SIZES[kind];
   if (!s) return;
   const { width } = win.getContentBounds();
-  popoverView.setBounds({ x: Math.max(0, width - s.w - 10), y: CHROME_HEIGHT, width: s.w, height: s.h });
+  const { x, y } = popoverPos(kind, s, width);
+  popoverView.setBounds({ x, y, width: s.w, height: s.h });
   popoverView.setVisible(true);
   popoverView.webContents.send('pop:show', kind);
   sendDownloads();
   if (kind === 'history') popoverView.webContents.send('history', store.getHistory().slice(0, 300));
+  if (kind === 'siteinfo') sendSiteinfo();
   popoverView.webContents.focus();
   popKind = kind;
 }
@@ -680,7 +814,14 @@ function createWindow() {
   ctxView.setVisible(false);
   ctxView.webContents.on('blur', hideContext); // close on click-away
 
-  for (const v of [heroView, aiView, chromeView, popoverView, findView, ctxView]) {
+  permView = new WebContentsView({
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'permission-preload.js') },
+  });
+  win.contentView.addChildView(permView);
+  permView.webContents.loadFile(path.join(__dirname, 'permission.html'));
+  permView.setVisible(false);
+
+  for (const v of [heroView, aiView, chromeView, popoverView, findView, ctxView, permView]) {
     attachShortcuts(v.webContents);
     v.webContents.on('did-finish-load', () => applyAccent(v));
     // Trusted chrome must never navigate itself or spawn windows. Real web
@@ -782,6 +923,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   fs.mkdirSync(AI_CWD, { recursive: true });
   applyDoh();
+  setupPermissions();
   setupDownloads();
   createWindow();
   app.on('activate', () => {
@@ -887,6 +1029,15 @@ ipcMain.on('find:show', showFind);
 // --- IPC: context menu ---
 ipcMain.on('ctx:invoke', (_e, id) => runCtxAction(id));
 ipcMain.on('ctx:close', hideContext);
+
+// --- IPC: permission prompt ---
+ipcMain.on('perm:decide', (_e, allow) => decidePermission(allow));
+
+// --- IPC: site-info popover (clear a remembered per-site permission) ---
+ipcMain.on('perm:clear', (_e, { origin, perm }) => {
+  store.clearPermission(origin, perm);
+  if (popKind === 'siteinfo') sendSiteinfo();
+});
 
 // --- IPC: history ---
 ipcMain.on('pop:history', () => showPopover('history'));

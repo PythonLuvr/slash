@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const KINDS = ['menu', 'profile', 'downloads', 'history'];
+const KINDS = ['menu', 'profile', 'downloads', 'history', 'siteinfo'];
 
 const hsearch = $('hsearch');
 
@@ -120,3 +120,47 @@ window.overlay.onHistory((list) => {
 });
 if (hsearch) hsearch.addEventListener('input', renderHistory);
 if ($('hclear')) $('hclear').addEventListener('click', () => window.overlay.clearHistory());
+
+// --- Site info ---
+const PERM_NAMES = {
+  media: 'Camera & microphone',
+  geolocation: 'Location',
+  notifications: 'Notifications',
+  'clipboard-read': 'Clipboard',
+  midi: 'MIDI devices',
+  midiSysex: 'MIDI devices',
+};
+window.overlay.onSiteinfo((data) => {
+  const status = $('si-status');
+  const secure = data.secure === 'secure';
+  status.textContent = secure ? 'Connection is secure' : 'Connection is not secure';
+  status.classList.toggle('insecure', !secure);
+  $('si-host').textContent = data.host || '';
+  const wrap = $('si-perms');
+  wrap.innerHTML = '';
+  if (!data.permissions || !data.permissions.length) {
+    wrap.innerHTML = '<div class="si-empty">This site has not requested any permissions.</div>';
+    return;
+  }
+  for (const p of data.permissions) {
+    const row = document.createElement('div');
+    row.className = 'si-perm';
+    const name = document.createElement('span');
+    name.className = 'si-perm-name';
+    name.textContent = PERM_NAMES[p.perm] || p.perm;
+    const state = document.createElement('span');
+    state.className = 'si-perm-state ' + (p.decision === 'allow' ? 'allow' : 'block');
+    state.textContent = p.decision === 'allow' ? 'Allowed' : 'Blocked';
+    const reset = document.createElement('button');
+    reset.className = 'si-perm-reset';
+    reset.type = 'button';
+    reset.title = 'Reset to ask';
+    reset.setAttribute('aria-label', 'Reset ' + (PERM_NAMES[p.perm] || p.perm));
+    reset.innerHTML = '&#10005;';
+    reset.addEventListener('click', () => window.overlay.clearPermission(data.origin, p.perm));
+    row.appendChild(name);
+    row.appendChild(state);
+    row.appendChild(reset);
+    wrap.appendChild(row);
+  }
+});

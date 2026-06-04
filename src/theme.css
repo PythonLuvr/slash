@@ -33,6 +33,9 @@
   --accent-soft: rgba(241, 203, 83, 0.16);
   --on-accent: #18181b;
 
+  /* Functional status color for security warnings (not a second brand accent) */
+  --warn: #e0a23d;
+
   --radius: 8px;
   --radius-sm: 6px;
   --radius-lg: 12px;

@@ -4,6 +4,14 @@ const back = $('back');
 const forward = $('forward');
 const reload = $('reload');
 const tabsEl = $('tabs');
+const siteinfo = $('siteinfo');
+
+// Neutral site-info icon (sliders / "tune", not a trust-implying padlock) for
+// secure pages; a warning triangle for plain HTTP.
+const ICON_SECURE =
+  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="8" x2="20" y2="8"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="9" cy="8" r="2.6" fill="var(--paper)"/><circle cx="15" cy="16" r="2.6" fill="var(--paper)"/></svg>';
+const ICON_INSECURE =
+  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l8.5 15h-17z"/><line x1="12" y1="9.5" x2="12" y2="13.5"/><circle cx="12" cy="16.5" r="0.6" fill="currentColor"/></svg>';
 
 // --- Toolbar ---
 let omnibarFocused = false;
@@ -107,6 +115,19 @@ window.slash.onState((s) => {
   star.innerHTML = s.bookmarked ? '&#9733;' : '&#9734;';
   star.classList.toggle('on', !!s.bookmarked);
   star.disabled = s.mode === 'hero';
+
+  // Site-info button: hidden on the start page, sliders icon on https, warning
+  // triangle on plain http.
+  if (s.security === 'internal' || !s.security) {
+    siteinfo.classList.add('hidden');
+  } else {
+    siteinfo.classList.remove('hidden');
+    const insecure = s.security === 'insecure';
+    siteinfo.innerHTML = insecure ? ICON_INSECURE : ICON_SECURE;
+    siteinfo.classList.toggle('insecure', insecure);
+    siteinfo.title = insecure ? 'Connection is not secure' : 'Site information';
+  }
+
   document.title = s.title || 'Slash';
 });
 
@@ -160,6 +181,7 @@ window.slash.onFocusOmnibox(() => {
 });
 
 // --- Top-right cluster ---
+siteinfo.addEventListener('click', () => window.slash.togglePop('siteinfo'));
 $('star').addEventListener('click', () => window.slash.toggleBookmark());
 $('ai').addEventListener('click', () => window.slash.toggleAI());
 $('menu-btn').addEventListener('click', () => window.slash.togglePop('menu'));

@@ -17,9 +17,11 @@ function read() {
     return {
       bookmarks: Array.isArray(parsed.bookmarks) ? parsed.bookmarks : [],
       history: Array.isArray(parsed.history) ? parsed.history : [],
+      permissions: parsed.permissions && typeof parsed.permissions === 'object' ? parsed.permissions : {},
+      httpAllow: Array.isArray(parsed.httpAllow) ? parsed.httpAllow : [],
     };
   } catch {
-    return { bookmarks: [], history: [] };
+    return { bookmarks: [], history: [], permissions: {}, httpAllow: [] };
   }
 }
 
@@ -71,6 +73,46 @@ function clearHistory() {
   write(data);
 }
 
+// --- Per-site permissions ---
+// permissions: { [origin]: { [permission]: 'allow' | 'block' } }
+function getPermission(origin, perm) {
+  if (!origin) return undefined;
+  const site = read().permissions[origin];
+  return site ? site[perm] : undefined;
+}
+function setPermission(origin, perm, decision) {
+  if (!origin) return;
+  const data = read();
+  data.permissions[origin] = data.permissions[origin] || {};
+  data.permissions[origin][perm] = decision; // 'allow' | 'block'
+  write(data);
+}
+function getSitePermissions(origin) {
+  if (!origin) return {};
+  return read().permissions[origin] || {};
+}
+function clearPermission(origin, perm) {
+  const data = read();
+  if (data.permissions[origin]) {
+    delete data.permissions[origin][perm];
+    if (!Object.keys(data.permissions[origin]).length) delete data.permissions[origin];
+    write(data);
+  }
+}
+
+// --- HTTPS-only escape hatch: origins the user chose to load over HTTP ---
+function isHttpAllowed(origin) {
+  return !!origin && read().httpAllow.includes(origin);
+}
+function allowHttp(origin) {
+  if (!origin) return;
+  const data = read();
+  if (!data.httpAllow.includes(origin)) {
+    data.httpAllow.push(origin);
+    write(data);
+  }
+}
+
 module.exports = {
   getBookmarks,
   isBookmarked,
@@ -79,4 +121,10 @@ module.exports = {
   getHistory,
   addHistory,
   clearHistory,
+  getPermission,
+  setPermission,
+  getSitePermissions,
+  clearPermission,
+  isHttpAllowed,
+  allowHttp,
 };

@@ -218,3 +218,87 @@ body {
   color: var(--muted);
   flex: 0 0 auto;
 }
+
+/* Site info */
+.si-head {
+  padding: 8px 10px 6px;
+}
+
+.si-status {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.si-status.insecure {
+  color: var(--warn);
+}
+
+.si-host {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.si-empty {
+  padding: 6px 10px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.si-perm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.si-perm:hover {
+  background: var(--raised-2);
+}
+
+.si-perm-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.si-perm-state {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+
+.si-perm-state.allow {
+  color: var(--accent);
+}
+
+.si-perm-state.block {
+  color: var(--muted);
+}
+
+.si-perm-reset {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.si-perm-reset:hover {
+  background: var(--raised);
+  color: var(--ink);
+}

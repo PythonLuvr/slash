@@ -151,6 +151,30 @@
   cursor: default;
 }
 
+.siteinfo {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.siteinfo:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.siteinfo.insecure {
+  color: var(--warn);
+}
+
 #omnibar {
   flex: 1 1 auto;
   height: 34px;
