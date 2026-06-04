@@ -11,11 +11,36 @@
   background: var(--titlebar);
 }
 
+#home {
+  width: 30px;
+  height: 28px;
+  margin-bottom: 3px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+#home:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+}
+
+#home.active {
+  color: var(--accent);
+}
+
 #tabs {
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;

@@ -5,6 +5,11 @@ const forward = $('forward');
 const reload = $('reload');
 const tabsEl = $('tabs');
 const siteinfo = $('siteinfo');
+const home = $('home');
+
+home.innerHTML =
+  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v9h5v-5h4v5h5v-9"/></svg>';
+home.addEventListener('click', () => window.slash.goHome());
 
 // Neutral site-info icon (sliders / "tune", not a trust-implying padlock) for
 // secure pages; a warning triangle for plain HTTP.
@@ -115,6 +120,7 @@ window.slash.onState((s) => {
   star.innerHTML = s.bookmarked ? '&#9733;' : '&#9734;';
   star.classList.toggle('on', !!s.bookmarked);
   star.disabled = s.mode === 'hero';
+  home.classList.toggle('active', s.mode === 'hero');
 
   // Site-info button: hidden on the start page, sliders icon on https, warning
   // triangle on plain http.
