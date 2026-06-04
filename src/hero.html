@@ -15,18 +15,20 @@
           <button id="mode-search" class="seg active" type="button" role="tab" aria-selected="true">&#128269; Search</button>
           <button id="mode-ai" class="seg" type="button" role="tab" aria-selected="false">&#10022; Ask AI</button>
         </div>
-        <div id="box">
-          <span class="sicon">&#128269;</span>
-          <input
-            id="input"
-            type="text"
-            placeholder="Search DuckDuckGo or enter an address"
-            spellcheck="false"
-            autocomplete="off"
-            aria-label="Search"
-          />
+        <div id="boxwrap">
+          <div id="box">
+            <span class="sicon">&#128269;</span>
+            <input
+              id="input"
+              type="text"
+              placeholder="Search DuckDuckGo or enter an address"
+              spellcheck="false"
+              autocomplete="off"
+              aria-label="Search"
+            />
+          </div>
+          <div id="suggest" class="hidden"></div>
         </div>
-        <div id="suggest" class="hidden"></div>
         <div id="engines" role="tablist" aria-label="Search engines"></div>
         <div id="models" class="hidden" role="tablist" aria-label="AI models"></div>
       </div>

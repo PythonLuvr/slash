@@ -1,12 +1,27 @@
 // Providers shown in the picker. kind matches the apiKeys / apiModels
 // entries in settings (anthropic / google / openai).
 const PROVIDERS = [
-  { id: 'claude', label: 'Claude', kind: 'anthropic' },
-  { id: 'gemini', label: 'Gemini', kind: 'google' },
-  { id: 'openai', label: 'ChatGPT', kind: 'openai' },
+  { id: 'claude', label: 'Claude', kind: 'anthropic', domain: 'claude.ai' },
+  { id: 'gemini', label: 'Gemini', kind: 'google', domain: 'gemini.google.com' },
+  { id: 'openai', label: 'ChatGPT', kind: 'openai', domain: 'chatgpt.com' },
 ];
 
 const $ = (id) => document.getElementById(id);
+
+// A provider logo (favicon), falling back to the spark glyph if it fails.
+function providerLogo(p) {
+  const img = document.createElement('img');
+  img.className = 'pk-logo';
+  img.src = `https://icons.duckduckgo.com/ip3/${p.domain}.ico`;
+  img.alt = '';
+  img.addEventListener('error', () => {
+    const sp = document.createElement('span');
+    sp.className = 'spark';
+    sp.textContent = '✦';
+    img.replaceWith(sp);
+  });
+  return img;
+}
 const input = $('input');
 const thread = $('thread');
 
@@ -24,6 +39,9 @@ function updatePickerLabel() {
   $('picker-label').textContent =
     providerLabel(selection.provider) + ' · ' + selection.variant.toUpperCase();
   input.placeholder = 'Message ' + providerLabel(selection.provider);
+  const p = PROVIDERS.find((x) => x.id === selection.provider) || PROVIDERS[0];
+  const logo = $('picker-logo');
+  if (logo) logo.src = `https://icons.duckduckgo.com/ip3/${p.domain}.ico`;
 }
 
 async function loadSettings() {
@@ -42,7 +60,10 @@ function buildPickerMenu() {
 
     const name = document.createElement('span');
     name.className = 'pk-name';
-    name.textContent = '✦ ' + p.label;
+    name.appendChild(providerLogo(p));
+    const nameLabel = document.createElement('span');
+    nameLabel.textContent = p.label;
+    name.appendChild(nameLabel);
     row.appendChild(name);
 
     const toggle = document.createElement('div');
@@ -145,7 +166,10 @@ function buildSettingsForm() {
 
     const title = document.createElement('div');
     title.className = 'set-title';
-    title.textContent = '✦ ' + p.label;
+    title.appendChild(providerLogo(p));
+    const titleLabel = document.createElement('span');
+    titleLabel.textContent = p.label;
+    title.appendChild(titleLabel);
     block.appendChild(title);
 
     const keyField = document.createElement('label');
