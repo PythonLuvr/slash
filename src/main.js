@@ -1655,10 +1655,11 @@ function maybeShowFirstRun() {
 }
 
 // --- Optional auto-update (packaged builds only). Never auto-installs: the
-// user chooses, and "What changed" opens the release notes. ---
+// user chooses to update (downloads in place and restarts, no separate exe),
+// to ignore this one, or to stop further update prompts. ---
 let pendingUpdate = null;
 function setupUpdater() {
-  if (!app.isPackaged) return;
+  if (!app.isPackaged || !readSettings().updatesEnabled) return;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.on('update-available', (info) => {
@@ -1669,20 +1670,13 @@ function setupUpdater() {
       actions: [
         { key: 'update', label: 'Update', primary: true },
         { key: 'notes', label: 'What changed' },
-        { key: 'later', label: 'Later', close: true },
+        { key: 'ignore', label: 'Ignore updates' },
+        { key: 'close', label: 'Dismiss', close: true },
       ],
     });
   });
-  autoUpdater.on('update-downloaded', (info) => {
-    showInfobar({
-      id: 'update-ready',
-      text: `Slash ${info.version} is ready to install.`,
-      actions: [
-        { key: 'restart', label: 'Restart to update', primary: true },
-        { key: 'later', label: 'Later', close: true },
-      ],
-    });
-  });
+  // The user already chose to update, so apply it in place and relaunch.
+  autoUpdater.on('update-downloaded', () => autoUpdater.quitAndInstall());
   autoUpdater.on('error', () => {
     /* offline / no release yet: stay quiet */
   });
@@ -1700,28 +1694,28 @@ ipcMain.on('infobar:action', (_e, { id, key }) => {
     hideInfobar();
   } else if (id === 'update') {
     if (key === 'update') {
+      // Download in the background; update-downloaded then restarts in place.
       try {
         autoUpdater.downloadUpdate();
       } catch {
         /* ignore */
       }
-      hideInfobar();
+      showInfobar({
+        id: 'updating',
+        text: `Downloading Slash ${pendingUpdate ? pendingUpdate.version : ''}… it will restart when ready.`,
+        actions: [{ key: 'close', label: 'Dismiss', close: true }],
+      });
     } else if (key === 'notes') {
       const tag = pendingUpdate ? 'tag/v' + pendingUpdate.version : '';
       createTab({ url: 'https://github.com/PythonLuvr/slash/releases' + (tag ? '/' + tag : ''), activate: true });
-    } else {
+    } else if (key === 'ignore') {
+      writeSettings({ updatesEnabled: false }); // stop offering further updates
       hideInfobar();
-    }
-  } else if (id === 'update-ready') {
-    if (key === 'restart') {
-      try {
-        autoUpdater.quitAndInstall();
-      } catch {
-        /* ignore */
-      }
     } else {
-      hideInfobar();
+      hideInfobar(); // dismiss: ask again next launch
     }
+  } else if (id === 'updating') {
+    hideInfobar();
   }
 });
 

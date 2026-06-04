@@ -35,6 +35,7 @@ const DEFAULTS = {
   httpsOnly: true, // upgrade http -> https, warn on failure
   blockAds: true, // EasyList/EasyPrivacy tracker + ad blocking
   seenDefaultPrompt: false, // shown the first-run "set as default" prompt yet
+  updatesEnabled: true, // check for + offer updates (user can ignore further updates)
 };
 
 const ENC_PREFIX = 'enc:v1:';
@@ -104,6 +105,8 @@ function readSettings() {
       blockAds: typeof parsed.blockAds === 'boolean' ? parsed.blockAds : DEFAULTS.blockAds,
       seenDefaultPrompt:
         typeof parsed.seenDefaultPrompt === 'boolean' ? parsed.seenDefaultPrompt : DEFAULTS.seenDefaultPrompt,
+      updatesEnabled:
+        typeof parsed.updatesEnabled === 'boolean' ? parsed.updatesEnabled : DEFAULTS.updatesEnabled,
     };
   } catch {
     return clone(DEFAULTS);
@@ -123,6 +126,8 @@ function writeSettings(patch) {
     blockAds: typeof patch.blockAds === 'boolean' ? patch.blockAds : cur.blockAds,
     seenDefaultPrompt:
       typeof patch.seenDefaultPrompt === 'boolean' ? patch.seenDefaultPrompt : cur.seenDefaultPrompt,
+    updatesEnabled:
+      typeof patch.updatesEnabled === 'boolean' ? patch.updatesEnabled : cur.updatesEnabled,
   };
   // Encrypt keys for disk; the returned object keeps plaintext for the app.
   const onDisk = { ...next, apiKeys: mapKeys(next.apiKeys, encryptKey) };
