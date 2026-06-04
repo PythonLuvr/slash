@@ -329,4 +329,5 @@ window.hero
 renderEngines();
 renderModels();
 renderTiles();
+input.placeholder = 'Search ' + source.label + ' or enter an address';
 input.focus();

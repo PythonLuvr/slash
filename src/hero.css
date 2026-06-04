@@ -12,7 +12,8 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 13vh 32px 32px;
+  justify-content: center;
+  padding: 40px 32px;
   gap: 34px;
 }
 
