@@ -342,13 +342,3 @@ window.hero.onAddDial(({ name, url }) => {
   }
   renderTiles();
 });
-
-// Blinking cursor: the leading mark toggles between / and _ ( /slash <-> _slash ).
-const slMark = document.querySelector('#brand .sl');
-if (slMark && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  let slash = true;
-  setInterval(() => {
-    slMark.textContent = slash ? '/' : '_';
-    slash = !slash;
-  }, 560);
-}
