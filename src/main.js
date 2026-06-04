@@ -19,6 +19,15 @@ const CTX_WIDTH = 244;
 const CTX_ROW = 34; // .pop-item height in context.css
 const CTX_SEP = 11; // .pop-sep height + margins
 const CTX_FRAME = 12; // body padding (5+5) + border (1+1)
+
+// Hardened defaults for every view. Trusted views add their own preload on
+// top; the untrusted page views get exactly this and no preload.
+const SECURE_PREFS = {
+  sandbox: true,
+  contextIsolation: true,
+  nodeIntegration: false,
+  webviewTag: false,
+};
 const AI_CWD = path.join(__dirname, '..', '.ai-scratch');
 
 let win;
@@ -59,6 +68,34 @@ const ENGINES = {
   wikipedia: (q) => 'https://en.wikipedia.org/w/index.php?search=' + encodeURIComponent(q),
 };
 
+// The user's chosen default search engine (private DuckDuckGo by default).
+function searchURL(q) {
+  const eng = readSettings().searchEngine;
+  return (ENGINES[eng] || ENGINES.duckduckgo)(q);
+}
+
+// DNS-over-HTTPS so lookups are not readable by the network/ISP. 'secure'
+// means all DNS goes through DoH; toggle off in settings if a resolver is
+// blocked on your network.
+function applyDoh() {
+  try {
+    const on = readSettings().doh;
+    session.defaultSession.configureHostResolver(
+      on
+        ? {
+            secureDnsMode: 'secure',
+            secureDnsServers: [
+              'https://cloudflare-dns.com/dns-query',
+              'https://dns.quad9.net/dns-query',
+            ],
+          }
+        : { secureDnsMode: 'off' },
+    );
+  } catch {
+    /* host resolver config unsupported on this platform */
+  }
+}
+
 const PROVIDERS = {
   claude: {
     label: 'Claude',
@@ -91,7 +128,7 @@ function normalizeInput(input) {
   if (!text) return null;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text;
   if (/^[^\s]+\.[^\s]+$/.test(text)) return 'https://' + text;
-  return 'https://www.google.com/search?q=' + encodeURIComponent(text);
+  return searchURL(text);
 }
 
 // --- Themeable accent: inject the user's accent into every chrome view ---
@@ -364,7 +401,7 @@ function runCtxAction(id) {
       if (wc) wc.selectAll();
       break;
     case 'search-sel':
-      if (p.selectionText) createTab({ url: ENGINES.google(p.selectionText.trim()), activate: true });
+      if (p.selectionText) createTab({ url: searchURL(p.selectionText.trim()), activate: true });
       break;
     case 'copy-page-url':
       if (wc) clipboard.writeText(wc.getURL());
@@ -413,7 +450,7 @@ function togglePopover(kind) {
 // --- Tabs ---
 function createTab(opts = {}) {
   const id = ++tabSeq;
-  const view = new WebContentsView();
+  const view = new WebContentsView({ webPreferences: { ...SECURE_PREFS } });
   const tab = {
     id,
     view,
@@ -601,27 +638,27 @@ function createWindow() {
   });
 
   heroView = new WebContentsView({
-    webPreferences: { preload: path.join(__dirname, 'hero-preload.js') },
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'hero-preload.js') },
   });
   win.contentView.addChildView(heroView);
   heroView.webContents.loadFile(path.join(__dirname, 'hero.html'));
   heroView.setVisible(false);
 
   aiView = new WebContentsView({
-    webPreferences: { preload: path.join(__dirname, 'ai-preload.js') },
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
   });
   win.contentView.addChildView(aiView);
   aiView.webContents.loadFile(path.join(__dirname, 'ai.html'));
   aiView.setVisible(false);
 
   chromeView = new WebContentsView({
-    webPreferences: { preload: path.join(__dirname, 'preload.js') },
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'preload.js') },
   });
   win.contentView.addChildView(chromeView);
   chromeView.webContents.loadFile(path.join(__dirname, 'index.html'));
 
   popoverView = new WebContentsView({
-    webPreferences: { preload: path.join(__dirname, 'overlay-preload.js') },
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'overlay-preload.js') },
   });
   win.contentView.addChildView(popoverView);
   popoverView.webContents.loadFile(path.join(__dirname, 'overlay.html'));
@@ -629,14 +666,14 @@ function createWindow() {
   popoverView.webContents.on('blur', hidePopover); // close on click-away
 
   findView = new WebContentsView({
-    webPreferences: { preload: path.join(__dirname, 'find-preload.js') },
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'find-preload.js') },
   });
   win.contentView.addChildView(findView);
   findView.webContents.loadFile(path.join(__dirname, 'find.html'));
   findView.setVisible(false);
 
   ctxView = new WebContentsView({
-    webPreferences: { preload: path.join(__dirname, 'context-preload.js') },
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'context-preload.js') },
   });
   win.contentView.addChildView(ctxView);
   ctxView.webContents.loadFile(path.join(__dirname, 'context.html'));
@@ -646,6 +683,10 @@ function createWindow() {
   for (const v of [heroView, aiView, chromeView, popoverView, findView, ctxView]) {
     attachShortcuts(v.webContents);
     v.webContents.on('did-finish-load', () => applyAccent(v));
+    // Trusted chrome must never navigate itself or spawn windows. Real web
+    // navigation only happens inside the untrusted per-tab page views.
+    v.webContents.on('will-navigate', (e) => e.preventDefault());
+    v.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   }
 
   win.on('resize', () => {
@@ -740,6 +781,7 @@ async function runApiAI({ conversationId, provider, transcript }, sender) {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   fs.mkdirSync(AI_CWD, { recursive: true });
+  applyDoh();
   setupDownloads();
   createWindow();
   app.on('activate', () => {
@@ -889,6 +931,7 @@ ipcMain.handle('settings:get', () => readSettings());
 ipcMain.handle('settings:set', (_e, patch) => {
   const next = writeSettings(patch);
   if (patch.accent) broadcastAccent();
+  if (typeof patch.doh === 'boolean') applyDoh();
   return next;
 });
 

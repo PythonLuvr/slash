@@ -1,12 +1,13 @@
 // Local, per-user settings store. Lives in the OS app-data directory
-// (app.getPath('userData')), never in the repo. Holds the AI model
-// selection plus BYOK API keys and editable model ids.
+// (app.getPath('userData')), never in the repo. Holds the AI model selection,
+// BYOK API keys, editable model ids, accent, and privacy options.
 //
-// API keys are stored in plaintext on the user's own machine, the same
-// way most bring-your-own-key desktop apps do. They are never sent
-// anywhere except directly to the provider you select.
+// API keys are encrypted at rest with Electron safeStorage (Windows DPAPI /
+// macOS Keychain / Linux libsecret) when available, and never leave the
+// machine except to the provider you select. If OS encryption is unavailable
+// they fall back to plaintext, the same as most BYOK desktop apps.
 
-const { app } = require('electron');
+const { app, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -29,10 +30,53 @@ const DEFAULTS = {
     openai: 'gpt-4o-mini',
   },
   accent: '#f1cb53', // themeable UI accent (soft yellow default)
+  searchEngine: 'duckduckgo', // private search by default
+  doh: true, // DNS-over-HTTPS on by default
 };
+
+const ENC_PREFIX = 'enc:v1:';
 
 function clone(obj) {
   return JSON.parse(JSON.stringify(obj));
+}
+
+function canEncrypt() {
+  try {
+    return safeStorage.isEncryptionAvailable();
+  } catch {
+    return false;
+  }
+}
+
+// Encrypt a key for disk. Empty stays empty; if OS encryption is unavailable
+// we store plaintext rather than lose the key.
+function encryptKey(plain) {
+  if (!plain) return '';
+  if (!canEncrypt()) return plain;
+  try {
+    return ENC_PREFIX + safeStorage.encryptString(plain).toString('base64');
+  } catch {
+    return plain;
+  }
+}
+
+// Decrypt a stored key back to plaintext for the app to use. Values without
+// the prefix are legacy plaintext, migrated to encrypted on the next write.
+function decryptKey(stored) {
+  if (!stored) return '';
+  if (!stored.startsWith(ENC_PREFIX)) return stored;
+  if (!canEncrypt()) return '';
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.slice(ENC_PREFIX.length), 'base64'));
+  } catch {
+    return '';
+  }
+}
+
+function mapKeys(obj, fn) {
+  const out = {};
+  for (const k of Object.keys(obj)) out[k] = fn(obj[k]);
+  return out;
 }
 
 function readSettings() {
@@ -45,11 +89,14 @@ function readSettings() {
       raw = fs.readFileSync(legacySettingsPath(), 'utf8');
     }
     const parsed = JSON.parse(raw);
+    const storedKeys = { ...DEFAULTS.apiKeys, ...(parsed.apiKeys || {}) };
     return {
       selection: { ...DEFAULTS.selection, ...(parsed.selection || {}) },
-      apiKeys: { ...DEFAULTS.apiKeys, ...(parsed.apiKeys || {}) },
+      apiKeys: mapKeys(storedKeys, decryptKey), // plaintext, for the app to use
       apiModels: { ...DEFAULTS.apiModels, ...(parsed.apiModels || {}) },
       accent: parsed.accent || DEFAULTS.accent,
+      searchEngine: parsed.searchEngine || DEFAULTS.searchEngine,
+      doh: typeof parsed.doh === 'boolean' ? parsed.doh : DEFAULTS.doh,
     };
   } catch {
     return clone(DEFAULTS);
@@ -57,15 +104,19 @@ function readSettings() {
 }
 
 function writeSettings(patch) {
-  const cur = readSettings();
+  const cur = readSettings(); // plaintext keys
   const next = {
     selection: { ...cur.selection, ...(patch.selection || {}) },
     apiKeys: { ...cur.apiKeys, ...(patch.apiKeys || {}) },
     apiModels: { ...cur.apiModels, ...(patch.apiModels || {}) },
     accent: patch.accent || cur.accent,
+    searchEngine: patch.searchEngine || cur.searchEngine,
+    doh: typeof patch.doh === 'boolean' ? patch.doh : cur.doh,
   };
+  // Encrypt keys for disk; the returned object keeps plaintext for the app.
+  const onDisk = { ...next, apiKeys: mapKeys(next.apiKeys, encryptKey) };
   fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
-  fs.writeFileSync(settingsPath(), JSON.stringify(next, null, 2), 'utf8');
+  fs.writeFileSync(settingsPath(), JSON.stringify(onDisk, null, 2), 'utf8');
   return next;
 }
 

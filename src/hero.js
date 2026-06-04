@@ -1,8 +1,8 @@
-// Search engines. Google is the default. AI is NOT here, it lives on the
-// search bar as its own mode.
+// Search engines. DuckDuckGo is the private default. AI is NOT here, it lives
+// on the search bar as its own mode.
 const SOURCES = [
-  { id: 'google', label: 'Google', domain: 'google.com' },
   { id: 'duckduckgo', label: 'DuckDuckGo', domain: 'duckduckgo.com' },
+  { id: 'google', label: 'Google', domain: 'google.com' },
   { id: 'wikipedia', label: 'Wikipedia', domain: 'wikipedia.org' },
 ];
 
@@ -22,7 +22,7 @@ const suggestEl = $('suggest');
 const tilesEl = $('tiles');
 const sicon = document.querySelector('#box .sicon');
 
-let source = SOURCES[0]; // Google
+let source = SOURCES[0]; // DuckDuckGo
 let aiModel = 'claude';
 let mode = 'search';
 
