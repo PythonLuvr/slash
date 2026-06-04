@@ -9,6 +9,12 @@ Cross-cutting rule: every new UI surface (site-info, permission prompt, blocker
 counter, clear-data, private window) follows `DESIGN.md`. Dark chrome, one
 accent, borders-only, mono for machine facts.
 
+**Landed (sweep #1, 2026-06-04):** item 1 (DuckDuckGo default + `searchEngine`
+setting), item 2 (API keys encrypted via safeStorage), item 5 (shell hardened:
+sandbox/contextIsolation/nav-block/CSP on all views), item 8 (DoH). Next up:
+item 3 (permission prompts) and item 4 (HTTPS-only), which both need the
+site-info omnibox UI, then item 6 (the tracker/ad blocker).
+
 ## Tier 1, quick wins with real impact
 
 ### 1. Private search by default (DuckDuckGo)
