@@ -8,6 +8,8 @@ const { autoUpdater } = require('electron-updater');
 const store = require('./lib/store');
 
 app.setName('Slash');
+// Windows taskbar / notification identity (so it groups as Slash, not Electron).
+if (process.platform === 'win32') app.setAppUserModelId('com.pythonluvr.slash');
 
 // Single instance: when Slash is the default browser and a link is opened, the
 // OS launches us again with the URL in argv. Reuse the running window instead

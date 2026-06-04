@@ -30,12 +30,6 @@ body {
 #brand .sl {
   color: var(--accent);
   font-weight: 700;
-  animation: blink 1.1s steps(1) infinite;
-}
-
-@keyframes blink {
-  0%, 55% { opacity: 1; }
-  55.01%, 100% { opacity: 0; }
 }
 
 /* --- Glassy search --- */
