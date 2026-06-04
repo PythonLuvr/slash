@@ -364,7 +364,7 @@
   background: var(--accent-hover);
 }
 
-#infobar #ib-close {
+#infobar .ib-close {
   width: 28px;
   padding: 0;
   border-color: transparent;

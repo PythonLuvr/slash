@@ -211,13 +211,30 @@ $('menu-btn').addEventListener('click', () => window.slash.togglePop('menu'));
 $('profile').addEventListener('click', () => window.slash.togglePop('profile'));
 $('downloads').addEventListener('click', () => window.slash.togglePop('downloads'));
 
-// First-run default-browser infobar (a non-blocking strip; main controls the
-// chrome height so it pushes content down rather than overlapping it).
+// Generic infobar strip (main controls the chrome height so it pushes content
+// down rather than overlapping it). Used by the first-run default-browser
+// prompt and update notifications.
 const infobar = $('infobar');
-window.slash.onFirstRun(() => infobar.classList.remove('hidden'));
-window.slash.onFirstRunHide(() => infobar.classList.add('hidden'));
-$('ib-set').addEventListener('click', () => window.slash.firstRunChoice(true));
-$('ib-later').addEventListener('click', () => window.slash.firstRunChoice(false));
-$('ib-close').addEventListener('click', () => window.slash.firstRunChoice(false));
+window.slash.onInfobar((payload) => {
+  $('ib-text').textContent = payload.text || '';
+  const actions = $('ib-actions');
+  actions.innerHTML = '';
+  for (const a of payload.actions || []) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    if (a.close) {
+      btn.className = 'ib-close';
+      btn.setAttribute('aria-label', a.label || 'Dismiss');
+      btn.innerHTML = '&#10005;';
+    } else {
+      if (a.primary) btn.className = 'ib-primary';
+      btn.textContent = a.label;
+    }
+    btn.addEventListener('click', () => window.slash.infobarAction(payload.id, a.key));
+    actions.appendChild(btn);
+  }
+  infobar.classList.remove('hidden');
+});
+window.slash.onInfobarHide(() => infobar.classList.add('hidden'));
 
 window.slash.ready();

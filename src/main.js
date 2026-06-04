@@ -4,6 +4,7 @@ const fs = require('fs');
 const { readSettings, writeSettings } = require('./lib/settings');
 const { STREAMERS, runAnthropicAgent } = require('./lib/api');
 const { startMcpServer } = require('./lib/mcp-server');
+const { autoUpdater } = require('electron-updater');
 const store = require('./lib/store');
 
 app.setName('Slash');
@@ -1403,6 +1404,8 @@ app.whenReady().then(() => {
     .catch(() => {
       mcpConfigPath = null;
     });
+
+  setupUpdater();
   app.on('activate', () => {
     if (BaseWindow.getAllWindows().length === 0) createWindow();
   });
@@ -1619,11 +1622,18 @@ ipcMain.on('ai:to-sidebar', (_e, data) => {
   aiView.webContents.send('ai:load', data);
 });
 
-// --- First-run "set as default" infobar (a non-blocking strip in the chrome) ---
-function showInfobar(open) {
-  infobarOpen = open;
-  CHROME_HEIGHT = BASE_CHROME + (open ? INFOBAR_HEIGHT : 0);
-  if (chromeView) chromeView.webContents.send(open ? 'first-run' : 'first-run-hide');
+// --- Infobar: a non-blocking strip in the chrome, shared by the first-run
+// default-browser prompt and update notifications. ---
+function showInfobar(payload) {
+  infobarOpen = true;
+  CHROME_HEIGHT = BASE_CHROME + INFOBAR_HEIGHT;
+  if (chromeView) chromeView.webContents.send('infobar:show', payload);
+  layout();
+}
+function hideInfobar() {
+  infobarOpen = false;
+  CHROME_HEIGHT = BASE_CHROME;
+  if (chromeView) chromeView.webContents.send('infobar:hide');
   layout();
 }
 function maybeShowFirstRun() {
@@ -1633,16 +1643,86 @@ function maybeShowFirstRun() {
     writeSettings({ seenDefaultPrompt: true });
     return;
   }
-  showInfobar(true);
+  showInfobar({
+    id: 'firstrun',
+    text: 'Make Slash your default browser?',
+    actions: [
+      { key: 'set', label: 'Set as default', primary: true },
+      { key: 'later', label: 'Not now' },
+      { key: 'close', label: 'Dismiss', close: true },
+    ],
+  });
 }
-ipcMain.on('firstrun:choice', (_e, setDefault) => {
-  if (setDefault) {
-    app.setAsDefaultProtocolClient('http');
-    app.setAsDefaultProtocolClient('https');
-    if (process.platform === 'win32') shell.openExternal('ms-settings:defaultapps').catch(() => {});
+
+// --- Optional auto-update (packaged builds only). Never auto-installs: the
+// user chooses, and "What changed" opens the release notes. ---
+let pendingUpdate = null;
+function setupUpdater() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.on('update-available', (info) => {
+    pendingUpdate = info;
+    showInfobar({
+      id: 'update',
+      text: `Slash ${info.version} is available.`,
+      actions: [
+        { key: 'update', label: 'Update', primary: true },
+        { key: 'notes', label: 'What changed' },
+        { key: 'later', label: 'Later', close: true },
+      ],
+    });
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    showInfobar({
+      id: 'update-ready',
+      text: `Slash ${info.version} is ready to install.`,
+      actions: [
+        { key: 'restart', label: 'Restart to update', primary: true },
+        { key: 'later', label: 'Later', close: true },
+      ],
+    });
+  });
+  autoUpdater.on('error', () => {
+    /* offline / no release yet: stay quiet */
+  });
+  autoUpdater.checkForUpdates().catch(() => {});
+}
+
+ipcMain.on('infobar:action', (_e, { id, key }) => {
+  if (id === 'firstrun') {
+    if (key === 'set') {
+      app.setAsDefaultProtocolClient('http');
+      app.setAsDefaultProtocolClient('https');
+      if (process.platform === 'win32') shell.openExternal('ms-settings:defaultapps').catch(() => {});
+    }
+    writeSettings({ seenDefaultPrompt: true });
+    hideInfobar();
+  } else if (id === 'update') {
+    if (key === 'update') {
+      try {
+        autoUpdater.downloadUpdate();
+      } catch {
+        /* ignore */
+      }
+      hideInfobar();
+    } else if (key === 'notes') {
+      const tag = pendingUpdate ? 'tag/v' + pendingUpdate.version : '';
+      createTab({ url: 'https://github.com/PythonLuvr/slash/releases' + (tag ? '/' + tag : ''), activate: true });
+    } else {
+      hideInfobar();
+    }
+  } else if (id === 'update-ready') {
+    if (key === 'restart') {
+      try {
+        autoUpdater.quitAndInstall();
+      } catch {
+        /* ignore */
+      }
+    } else {
+      hideInfobar();
+    }
   }
-  writeSettings({ seenDefaultPrompt: true });
-  showInfobar(false);
 });
 
 // --- IPC: default browser ---
