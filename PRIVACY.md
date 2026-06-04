@@ -15,9 +15,11 @@ prompts + site-info omnibox button/popover), item 4 (HTTPS-only with fallback
 interstitial), item 5 (shell hardened: sandbox/contextIsolation/nav-block/CSP
 on all views), item 6 (EasyList/EasyPrivacy ad/tracker blocker via
 @ghostery/adblocker-electron, with a shield button + per-page blocked count +
-on/off toggle), item 8 (DoH). Next up: item 7 (third-party cookies + referrer),
-item 9 (clear-data + private window), item 14 (AI send-page consent UI). A real
-settings surface to expose all these toggles is also now due.
+on/off toggle), item 8 (DoH), plus a full in-app settings surface exposing
+search engine, the privacy toggles, and accent. Next up: item 7 (third-party
+cookies + referrer), item 9 (clear-data + private window), item 14 (AI
+send-page consent UI). The settings page now has homes for clear-data and a
+private-window launcher when those land.
 
 ## Tier 1, quick wins with real impact
 
