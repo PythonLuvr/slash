@@ -16,6 +16,54 @@ async function load() {
   renderEngines();
   renderToggles();
   renderAccents();
+  renderDefault();
+  renderImport();
+}
+
+async function renderDefault() {
+  let isDef = false;
+  try {
+    isDef = await window.settings.defaultStatus();
+  } catch {
+    /* ignore */
+  }
+  $('default-desc').textContent = isDef
+    ? 'Slash is registered to handle web links on this device.'
+    : 'Open web links in Slash. Windows will ask you to confirm in Default Apps.';
+  $('set-default').textContent = isDef ? 'Set again' : 'Set as default';
+}
+$('set-default').addEventListener('click', async () => {
+  $('set-default').textContent = 'Opening Default Apps…';
+  await window.settings.setDefault();
+  setTimeout(renderDefault, 500);
+});
+
+async function renderImport() {
+  const wrap = $('import-list');
+  wrap.innerHTML = '';
+  let sources = [];
+  try {
+    sources = await window.settings.importList();
+  } catch {
+    /* ignore */
+  }
+  if (!sources.length) {
+    wrap.innerHTML = '<div class="import-empty">No other browsers found.</div>';
+    return;
+  }
+  for (const s of sources) {
+    const btn = document.createElement('button');
+    btn.className = 'btn import-btn';
+    btn.type = 'button';
+    btn.textContent = `${s.name} (${s.count})`;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = `${s.name} · importing…`;
+      const r = await window.settings.importRun(s.id);
+      btn.textContent = `${s.name} · ${r.imported} added`;
+    });
+    wrap.appendChild(btn);
+  }
 }
 
 function renderEngines() {

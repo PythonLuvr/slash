@@ -8,6 +8,25 @@ const store = require('./lib/store');
 
 app.setName('Slash');
 
+// Single instance: when Slash is the default browser and a link is opened, the
+// OS launches us again with the URL in argv. Reuse the running window instead
+// of spawning a second app, and open the link as a tab.
+function urlFromArgv(argv) {
+  return (argv || []).find((a) => /^https?:\/\//i.test(a)) || null;
+}
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', (_e, argv) => {
+    const url = urlFromArgv(argv);
+    if (win) {
+      if (url) createTab({ url, activate: true });
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+}
+
 // Chrome = tab strip + toolbar + bookmarks bar. AI panel docks on the right.
 const TABSTRIP_HEIGHT = 38;
 const TOOLBAR_HEIGHT = 56;
@@ -1053,6 +1072,9 @@ function createWindow() {
   layout();
 
   createTab(); // opens on the hero
+  // If launched as the default browser with a URL (e.g. clicked link), open it.
+  const startUrl = urlFromArgv(process.argv);
+  if (startUrl) createTab({ url: startUrl, activate: true });
 }
 
 // --- AI prompt building + routing (unchanged behavior) ---
@@ -1591,6 +1613,78 @@ ipcMain.on('ai:to-sidebar', (_e, data) => {
   sendTabs();
   toggleAI(true);
   aiView.webContents.send('ai:load', data);
+});
+
+// --- IPC: default browser ---
+ipcMain.handle('default:status', () => app.isDefaultProtocolClient('http'));
+ipcMain.handle('default:set', () => {
+  app.setAsDefaultProtocolClient('http');
+  app.setAsDefaultProtocolClient('https');
+  // Windows can't be forced; open the Default Apps page so the user can pick.
+  if (process.platform === 'win32') shell.openExternal('ms-settings:defaultapps').catch(() => {});
+  return app.isDefaultProtocolClient('http');
+});
+
+// --- IPC: import bookmarks from another browser (Chromium family) ---
+function importSources() {
+  const LA = process.env.LOCALAPPDATA || '';
+  const AD = process.env.APPDATA || '';
+  const sources = [
+    { id: 'chrome', name: 'Google Chrome', path: path.join(LA, 'Google/Chrome/User Data/Default/Bookmarks') },
+    { id: 'edge', name: 'Microsoft Edge', path: path.join(LA, 'Microsoft/Edge/User Data/Default/Bookmarks') },
+    { id: 'brave', name: 'Brave', path: path.join(LA, 'BraveSoftware/Brave-Browser/User Data/Default/Bookmarks') },
+    { id: 'vivaldi', name: 'Vivaldi', path: path.join(LA, 'Vivaldi/User Data/Default/Bookmarks') },
+    { id: 'opera', name: 'Opera', path: path.join(AD, 'Opera Software/Opera Stable/Bookmarks') },
+  ];
+  return sources.filter((s) => {
+    try {
+      return s.path && fs.existsSync(s.path);
+    } catch {
+      return false;
+    }
+  });
+}
+function readChromiumBookmarks(file) {
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const out = [];
+  const walk = (node) => {
+    if (!node) return;
+    if (node.type === 'url' && node.url && /^https?:/i.test(node.url)) {
+      out.push({ url: node.url, title: node.name || node.url });
+    }
+    if (Array.isArray(node.children)) node.children.forEach(walk);
+  };
+  const roots = data.roots || {};
+  for (const k of Object.keys(roots)) walk(roots[k]);
+  return out;
+}
+ipcMain.handle('import:list', () =>
+  importSources().map((s) => {
+    let count = 0;
+    try {
+      count = readChromiumBookmarks(s.path).length;
+    } catch {
+      /* unreadable */
+    }
+    return { id: s.id, name: s.name, count };
+  }),
+);
+ipcMain.handle('import:run', (_e, id) => {
+  const s = importSources().find((x) => x.id === id);
+  if (!s) return { imported: 0 };
+  let imported = 0;
+  try {
+    for (const b of readChromiumBookmarks(s.path)) {
+      if (!store.isBookmarked(b.url)) {
+        store.addBookmark(b);
+        imported++;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  sendBookmarks();
+  return { imported };
 });
 
 // --- IPC: settings ---
