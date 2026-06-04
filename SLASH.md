@@ -99,9 +99,16 @@ downloads (tracked), zoom, top-right cluster (menu/profile/downloads/history),
 bookmarks bar + star (Ctrl+D), find-in-page (Ctrl+F), history popover.
 Accessibility baseline (aria-labels, focus-visible, reduced-motion).
 
-Not done / next (see BROWSER-UI.md): right-click context menus, SQLite for
-history/bookmarks (currently JSON), session restore, omnibox security/site-
-info icon, real extensions, tab groups, full settings surface, F11
+Also done (2026-06-04): right-click context menus (`src/context.*`); a
+privacy/safe layer (see `PRIVACY.md`): encrypted API keys (safeStorage),
+hardened shell (sandbox/CSP/nav-block), DoH, DuckDuckGo default, per-site
+permission prompts + site-info omnibox button/popover, HTTPS-only with a
+fallback interstitial.
+
+Not done / next (see BROWSER-UI.md + PRIVACY.md): tracker/ad blocker
+(EasyList), third-party-cookie + referrer hardening, clear-data + private
+window, a real settings surface (to expose the privacy toggles), SQLite for
+history/bookmarks, session restore, real extensions, tab groups, F11
 fullscreen, then OSS publish to `PythonLuvr/slash`.
 
 The internal `loom` -> `slash` rename is done (bridge `window.slash`,
