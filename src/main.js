@@ -1337,6 +1337,9 @@ ipcMain.on('ai:to-page', (_e, data) => {
   toggleAI(false); // close the docked sidebar
   goAIPage({ load: data });
 });
+ipcMain.on('ai:open-web', (_e, url) => {
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) createTab({ url, activate: true });
+});
 ipcMain.on('ai:to-sidebar', (_e, data) => {
   const at = activeTab();
   if (at) {

@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('ai', {
   toPage: (data) => ipcRenderer.send('ai:to-page', data),
   toSidebar: (data) => ipcRenderer.send('ai:to-sidebar', data),
   onLoad: (cb) => ipcRenderer.on('ai:load', (_e, d) => cb(d)),
+  // Open a provider's real web app in a new browser tab.
+  openWeb: (url) => ipcRenderer.send('ai:open-web', url),
 });

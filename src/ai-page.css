@@ -313,6 +313,26 @@ body::before {
   color: var(--accent);
 }
 
+.mm-open {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.mm-open:hover {
+  background: var(--raised-2);
+  color: var(--accent);
+}
+
 /* --- Landing (empty chat) --- */
 #landing {
   flex: 1;
