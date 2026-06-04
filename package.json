@@ -1,7 +1,7 @@
 {
-  "name": "loom",
+  "name": "slash",
   "version": "0.0.1",
-  "description": "Personal AI-native browser (codename Loom)",
+  "description": "Slash, a personal AI-native web browser",
   "main": "src/main.js",
   "scripts": {
     "start": "node launch.js"

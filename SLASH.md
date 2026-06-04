@@ -10,7 +10,7 @@ research EJ supplied).
 A personal, local, open-source, modifiable, low-usage **web browser** with a
 built-in AI panel. Built as a **custom Electron shell over Chromium** (route
 "A": own the UI, rent the engine). NOT a Firefox/Chromium fork. The folder is
-still `Desktop\loom` (codename was "Loom"); the product is named **Slash**.
+`Desktop\slash` (codename was "Loom"); the product is named **Slash**.
 
 ## Identity (locked, do not relitigate)
 
@@ -30,7 +30,7 @@ still `Desktop\loom` (codename was "Loom"); the product is named **Slash**.
 ## How to run
 
 ```
-cd Desktop\loom
+cd Desktop\slash
 npm start          # uses launch.js to strip ELECTRON_RUN_AS_NODE (see below)
 ```
 
