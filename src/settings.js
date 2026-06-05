@@ -106,14 +106,23 @@ if (pfCreate) {
 }
 
 // Jump to a section when opened from a shortcut (e.g. the profile menu).
-function scrollToSection(section) {
-  const el = section ? document.getElementById('sec-' + section) : null;
-  // Top of page by default so a plain open always starts clean.
-  window.scrollTo({ top: 0 });
-  if (el) {
-    // After layout settles (dynamic sections render async), bring it into view.
-    requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+// Show a single settings section (sidebar layout). `target` may be a short name
+// ('passwords') or a full id ('sec-passwords'); defaults to the first section.
+function showSection(target) {
+  const id = !target ? null : String(target).startsWith('sec-') ? target : 'sec-' + target;
+  const sections = document.querySelectorAll('#settings-content > section');
+  let active = (id && document.getElementById(id)) || sections[0];
+  for (const s of sections) s.classList.toggle('active', s === active);
+  for (const n of document.querySelectorAll('.nav-item')) {
+    n.classList.toggle('active', !!active && n.dataset.target === active.id);
   }
+  window.scrollTo({ top: 0 });
+}
+function scrollToSection(section) {
+  showSection(section || null);
+}
+for (const n of document.querySelectorAll('.nav-item')) {
+  n.addEventListener('click', () => showSection(n.dataset.target));
 }
 
 async function renderDefault() {

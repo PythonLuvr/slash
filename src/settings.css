@@ -7,9 +7,63 @@ body {
 }
 
 #page {
-  max-width: 680px;
+  max-width: 940px;
   margin: 0 auto;
-  padding: 40px 32px 64px;
+  padding: 32px 32px 64px;
+}
+
+/* Sidebar + content layout (click a category, see just that section) */
+#settings-body {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+}
+#settings-nav {
+  position: sticky;
+  top: 32px;
+  flex: 0 0 188px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nav-item {
+  text-align: left;
+  padding: 9px 12px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.nav-item:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 600;
+}
+#settings-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Only the selected section is shown. */
+#settings-content > section {
+  display: none;
+  margin: 0;
+  border-top: none;
+  padding-top: 0;
+}
+#settings-content > section.active {
+  display: block;
+}
+#settings-content > section > h2 {
+  margin-top: 0;
+  padding-top: 0;
 }
 
 header {

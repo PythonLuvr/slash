@@ -14,6 +14,22 @@
         <button id="close" type="button">Done</button>
       </header>
 
+      <div id="settings-body">
+        <nav id="settings-nav">
+          <button class="nav-item" data-target="sec-profiles">Profiles</button>
+          <button class="nav-item" data-target="sec-search">Search</button>
+          <button class="nav-item" data-target="sec-privacy">Privacy &amp; security</button>
+          <button class="nav-item" data-target="sec-passwords">Passwords</button>
+          <button class="nav-item" data-target="sec-extensions">Extensions</button>
+          <button class="nav-item" data-target="sec-performance">Performance</button>
+          <button class="nav-item" data-target="sec-ai">AI</button>
+          <button class="nav-item" data-target="sec-appearance">Appearance</button>
+          <button class="nav-item" data-target="sec-import">Import</button>
+          <button class="nav-item" data-target="sec-default">Default browser</button>
+          <button class="nav-item" data-target="sec-updates">Updates</button>
+        </nav>
+        <div id="settings-content">
+
       <section id="sec-profiles">
         <h2>Profiles</h2>
         <div class="row col">
@@ -47,7 +63,7 @@
         </div>
       </section>
 
-      <section>
+      <section id="sec-default">
         <h2>Default browser</h2>
         <div class="row">
           <div class="label">
@@ -58,7 +74,7 @@
         </div>
       </section>
 
-      <section>
+      <section id="sec-import">
         <h2>Move your stuff to Slash</h2>
         <div class="row col">
           <div class="label">
@@ -156,7 +172,7 @@
         </div>
       </section>
 
-      <section>
+      <section id="sec-updates">
         <h2>Updates</h2>
         <div class="row toggle-row" data-key="updatesEnabled">
           <div class="label">
@@ -167,7 +183,7 @@
         </div>
       </section>
 
-      <section>
+      <section id="sec-appearance">
         <h2>Appearance</h2>
         <div class="row">
           <div class="label">
@@ -178,7 +194,7 @@
         </div>
       </section>
 
-      <section>
+      <section id="sec-ai">
         <h2>AI</h2>
         <div class="row">
           <div class="label">
@@ -188,6 +204,8 @@
           <button id="open-ai" class="btn" type="button">Open AI settings</button>
         </div>
       </section>
+        </div>
+      </div>
     </div>
     <script src="settings.js"></script>
   </body>
