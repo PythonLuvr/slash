@@ -34,6 +34,8 @@ And because "trust me" is not good enough for the app that sees everything, the 
 ## What Slash offers
 
 - **AI built in.** A docked side panel and a full-screen assistant that can actually use the web (search, read pages, open and navigate tabs), with your choice of a free CLI or your own API key.
+- **Profiles that actually separate.** Work, School, Personal, each in its own window with its own logins, history, passwords, tabs, bookmarks, and extensions. Sign into an account in one and you are signed out in the others. No sign-in, all on your device.
+- **Chrome extensions.** Install from the Chrome Web Store or load an unpacked folder; content blockers and most extensions work, per profile.
 - **Private by default.** DuckDuckGo search, no account, no telemetry, nothing leaves your machine.
 - **Ads and trackers blocked.** EasyList + EasyPrivacy, applied at the network layer so the spyware never loads.
 - **Hardened connections.** HTTPS-only mode with a fallback warning page, plus encrypted DNS (DNS-over-HTTPS).

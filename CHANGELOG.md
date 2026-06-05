@@ -5,9 +5,10 @@
 The first public release of Slash: an AI-native, private-by-default web browser.
 
 ### Browsing
+- Multiple windows (Ctrl+N), each fully independent
 - Tabs with pinning, drag-to-reorder, and a right-click menu
 - Idle background tabs are suspended to save memory; a memory readout in the menu
-- Session restore: your open tabs come back next launch
+- Session restore: your open windows and tabs come back next launch
 - Private tabs (Ctrl+Shift+N): in-memory, no history, no traces
 - Bookmarks bar, history, downloads, find-in-page, zoom
 
@@ -32,11 +33,23 @@ The first public release of Slash: an AI-native, private-by-default web browser.
 
 ### Move-in
 - Import bookmarks, history, sessions, and passwords from another browser
-- Firefox bookmarks and history; default-browser setup
+  (Chrome, Edge, Brave, Opera, Opera GX, Vivaldi, Chromium, Yandex, Firefox)
+- Default-browser setup (registers Slash in Windows Default Apps)
 - Built-in password manager with CSV import and autofill
 
-### Profile
-- Your profile is just your computer account (no sign-in)
+### Profiles
+- Separate profiles (Work, School, Personal), each in its own window, with
+  isolated logins/cookies, history, passwords, tabs, bookmarks, and extensions
+- Theme and AI keys are shared across profiles; no sign-in, all on your device
+- Create, rename, recolor, and delete profiles from the profile menu and Settings
+
+### Extensions
+- Install Chrome extensions from the Chrome Web Store, or load an unpacked folder
+- Content blockers and most extensions work; extensions are per profile
+
+### Notes on the upgrade
+- On first launch your existing data is moved into a "default" profile
+  automatically (with .bak backups kept), nothing is lost
 
 ### Notes
 - The installer is currently unsigned (see README). Windows SmartScreen will warn
