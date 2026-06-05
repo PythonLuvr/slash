@@ -16,7 +16,14 @@ let current = null;
 let heroFavs = [];
 
 async function load(section) {
-  current = await window.settings.get();
+  try {
+    current = await window.settings.get();
+  } catch {
+    current = current || {};
+  }
+  // Show a section right away so the page is never blank, even if a render below
+  // throws or the settings bridge is slow.
+  scrollToSection(section);
   try {
     const r = await window.settings.searchGet();
     if (r && Array.isArray(r.list) && r.list.length) ENGINES = r.list;
@@ -24,16 +31,13 @@ async function load(section) {
   } catch {
     /* keep defaults */
   }
-  renderEngines();
-  renderToggles();
-  renderAccents();
-  renderDefault();
-  renderMigrate();
-  renderVault();
-  renderExtensions();
-  renderProfiles();
-  renderPerformance();
-  scrollToSection(section);
+  for (const fn of [renderEngines, renderToggles, renderAccents, renderDefault, renderMigrate, renderVault, renderExtensions, renderProfiles, renderPerformance]) {
+    try {
+      fn();
+    } catch {
+      /* one bad section must not blank the rest */
+    }
+  }
 }
 
 // --- Performance: RAM limit ---

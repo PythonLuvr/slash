@@ -515,7 +515,7 @@ function showNextPermission() {
   S.permView.setVisible(true);
   S.win.contentView.removeChildView(S.permView);
   S.win.contentView.addChildView(S.permView); // topmost
-  S.permView.webContents.send('perm:show', { origin: S.permActive.origin, action: S.permActive.label });
+  viewSend(S.permView, 'perm:show', { origin: S.permActive.origin, action: S.permActive.label });
   S.permView.webContents.focus();
 }
 
@@ -770,15 +770,15 @@ function goAIPage(opts = {}) {
   updateContentVisibility();
   sendState();
   sendTabs();
-  if (opts.prompt) S.aiPageView.webContents.send('ai:prompt', opts.prompt);
-  if (opts.load) S.aiPageView.webContents.send('ai:load', opts.load);
+  if (opts.prompt) viewSend(S.aiPageView, 'ai:prompt', opts.prompt);
+  if (opts.load) viewSend(S.aiPageView, 'ai:load', opts.load);
   S.aiPageView.webContents.focus();
 }
 
 function openSettingsPage(section) {
   ensureView('settingsView');
   S.settingsOpen = true;
-  S.settingsView.webContents.send('settings:show', typeof section === 'string' ? section : null);
+  viewSend(S.settingsView, 'settings:show', typeof section === 'string' ? section : null);
   updateContentVisibility();
   S.settingsView.webContents.focus();
 }
@@ -880,7 +880,7 @@ function showContext(params) {
   S.ctxView.setVisible(true);
   S.win.contentView.removeChildView(S.ctxView);
   S.win.contentView.addChildView(S.ctxView); // keep it topmost
-  S.ctxView.webContents.send('ctx:items', items);
+  viewSend(S.ctxView, 'ctx:items', items);
   S.ctxView.webContents.focus();
   S.ctxOpen = true;
 }
@@ -983,26 +983,30 @@ function sendSiteinfo() {
 function showPopover(kind) {
   const s = POP_SIZES[kind];
   if (!s) return;
-  ensureView('popoverView');
+  const v = ensureView('popoverView');
+  S.popKind = kind;
   const { width } = S.win.getContentBounds();
   const { x, y } = popoverPos(kind, s, width);
-  S.popoverView.setBounds({ x, y, width: s.w, height: s.h });
-  S.popoverView.setVisible(true);
-  S.popoverView.webContents.send('pop:show', kind);
-  sendDownloads();
-  if (kind === 'history') S.popoverView.webContents.send('history', store.getHistory().slice(0, 300));
-  if (kind === 'siteinfo') sendSiteinfo();
-  if (kind === 'shield') sendShield();
-  if (kind === 'setup') sendSetup();
-  if (kind === 'enginepick') {
-    S.popoverView.webContents.send('enginepick', { current: readSettings().searchEngine, list: allEngineMeta() });
-  }
-  if (kind === 'tabmenu') {
-    const t = S.tabs.find((x) => x.id === S.tabMenuTarget);
-    S.popoverView.webContents.send('tabmenu', { pinned: !!(t && t.pinned) });
-  }
-  S.popoverView.webContents.focus();
-  S.popKind = kind;
+  v.setBounds({ x, y, width: s.w, height: s.h });
+  v.setVisible(true);
+  // Populate once the overlay renderer is ready (it may have just been created).
+  const populate = () => {
+    if (S.popKind !== kind) return;
+    v.webContents.send('pop:show', kind);
+    sendDownloads();
+    if (kind === 'history') v.webContents.send('history', store.getHistory().slice(0, 300));
+    if (kind === 'siteinfo') sendSiteinfo();
+    if (kind === 'shield') sendShield();
+    if (kind === 'setup') sendSetup();
+    if (kind === 'enginepick') v.webContents.send('enginepick', { current: readSettings().searchEngine, list: allEngineMeta() });
+    if (kind === 'tabmenu') {
+      const t = S.tabs.find((x) => x.id === S.tabMenuTarget);
+      v.webContents.send('tabmenu', { pinned: !!(t && t.pinned) });
+    }
+  };
+  if (v.ready) populate();
+  else v.webContents.once('did-finish-load', populate);
+  v.webContents.focus();
 }
 
 // One default search engine, reflected in the omnibox button and the start page.
@@ -1455,8 +1459,12 @@ function makeView(key, visible) {
   S.win.contentView.addChildView(v);
   v.webContents.loadFile(path.join(__dirname, html));
   v.setVisible(!!visible);
+  v.ready = false;
   attachShortcuts(v.webContents);
-  v.webContents.on('did-finish-load', () => applyAccent(v));
+  v.webContents.on('did-finish-load', () => {
+    v.ready = true;
+    applyAccent(v);
+  });
   v.webContents.on('will-navigate', (e) => e.preventDefault());
   v.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   if (key === 'popoverView') {
@@ -1473,6 +1481,27 @@ function ensureView(key) {
   const v = makeView(key, false);
   raiseChrome(); // the new view was added on top; restore z-order
   return v;
+}
+// Send to a view, waiting for it to finish loading if it was just created (so the
+// initial message isn't lost before the renderer's listeners are registered).
+function viewSend(v, channel, ...args) {
+  if (!v) return;
+  const wc = v.webContents;
+  if (v.ready) {
+    try {
+      wc.send(channel, ...args);
+    } catch {
+      /* gone */
+    }
+  } else {
+    wc.once('did-finish-load', () => {
+      try {
+        wc.send(channel, ...args);
+      } catch {
+        /* gone */
+      }
+    });
+  }
 }
 
 function createBrowserWindow(opts = {}) {
