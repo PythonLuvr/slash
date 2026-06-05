@@ -87,3 +87,12 @@ build, and users can click "More info" -> "Run anyway").
 - Installers are currently **unsigned**, so Windows SmartScreen will warn on
   first install. Add a code-signing certificate to `build.win` when available.
 - `dist/` is gitignored; `build/` icons are committed as build resources.
+
+## Gotcha: ELECTRON_RUN_AS_NODE
+
+If `ELECTRON_RUN_AS_NODE=1` is set in the environment (some dev machines set it
+globally), the packaged `Slash.exe` runs as plain Node and exits immediately
+instead of launching the app. `launch.js` strips it for `npm start`, but the
+packaged exe has no wrapper. End users almost never have this set; if you do,
+launch the installed Slash from a shell with the variable cleared, e.g.
+PowerShell: `$env:ELECTRON_RUN_AS_NODE=$null; & "$env:LOCALAPPDATA\Programs\Slash\Slash.exe"`.

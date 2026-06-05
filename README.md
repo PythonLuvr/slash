@@ -85,6 +85,14 @@ npm run dist
 
 This produces a packaged build (Windows NSIS installer, macOS dmg, or Linux AppImage) named **Slash** with the app icon. Default-browser registration only works from the installed build, not from `npm start`.
 
+### Installing the released build on Windows
+
+The installer is **not code-signed** (signing certificates cost money, and Slash
+is free and open source). So on first run Windows SmartScreen shows a blue
+"Windows protected your PC" screen. This is expected for an unsigned open-source
+app. Click **More info**, then **Run anyway**. The code is all here for you to
+read if you would rather build it yourself.
+
 ## Configure AI
 
 - Toggle the panel with the spark icon in the toolbar or `Ctrl+J`.
