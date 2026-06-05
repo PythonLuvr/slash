@@ -75,7 +75,9 @@ const SECURE_PREFS = {
   nodeIntegration: false,
   webviewTag: false,
 };
-const AI_CWD = path.join(__dirname, '..', '.ai-scratch');
+// Scratch dir for spawned AI CLIs. Set once the app is ready, under userData
+// (writable) rather than next to the app, which is read-only inside the asar.
+let AI_CWD = null;
 
 let win;
 let chromeView; // tab strip + toolbar + bookmarks (trusted)
@@ -1680,7 +1682,12 @@ async function runApiAI({ conversationId, provider, transcript }, sender) {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
-  fs.mkdirSync(AI_CWD, { recursive: true });
+  AI_CWD = path.join(app.getPath('userData'), 'ai-scratch');
+  try {
+    fs.mkdirSync(AI_CWD, { recursive: true });
+  } catch {
+    /* non-fatal: AI CLI scratch dir */
+  }
   httpsOnly = readSettings().httpsOnly;
   applyDoh();
   setupPermissions();
