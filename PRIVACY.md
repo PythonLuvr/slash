@@ -138,6 +138,22 @@ releases. Set up when Slash starts shipping packaged builds.
 - CLI variants already run in default permission mode (no bypass, no autonomous
   tools). Do not loosen that.
 
+## Session and data lifecycle (landed 2026-06-05)
+
+- **Session restore:** the open tabs are saved (debounced + on quit) to
+  `userData/slash-session.json` and reopened on launch. Restored background tabs
+  come back suspended/lazy (reusing tab discarding), so startup is fast and
+  low-memory; only the active tab loads.
+- **Clear browsing data (item 9, partial):** Settings -> Privacy clears history
+  (`store.clearHistory`), cache (`session.clearCache`), and cookies + site data
+  (`session.clearStorageData`), each opt-in. Cookies default off so a clear does
+  not sign you out unless asked. The private window (item 9's other half) needs
+  the multi-window refactor and is tracked separately.
+- **Encrypt the local store at rest (item 10):** bookmarks / history /
+  permissions in `lib/store.js` are now encrypted with `safeStorage` (the same
+  pattern as API keys and the vault). Legacy plaintext is read once and
+  re-encrypted on the next write.
+
 ## Migration and passwords (landed 2026-06-05)
 
 Moving in from another browser, without sending anything off the machine.

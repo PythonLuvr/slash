@@ -92,6 +92,19 @@
           </div>
           <span class="sw" role="switch" tabindex="0"><span class="knob"></span></span>
         </div>
+        <div class="row col">
+          <div class="label">
+            <div class="name">Clear browsing data</div>
+            <div class="desc">Remove what Slash has stored on this device. Clearing cookies signs you out of sites.</div>
+          </div>
+          <div class="clear-data">
+            <label class="cd-opt"><input type="checkbox" id="cd-history" checked /> History</label>
+            <label class="cd-opt"><input type="checkbox" id="cd-cache" checked /> Cache</label>
+            <label class="cd-opt"><input type="checkbox" id="cd-cookies" /> Cookies &amp; site data</label>
+            <button id="cd-clear" class="btn" type="button">Clear now</button>
+            <span id="cd-msg" class="cd-msg"></span>
+          </div>
+        </div>
       </section>
 
       <section>

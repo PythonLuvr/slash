@@ -342,6 +342,37 @@ $('ce-url').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addCustomEngine();
 });
 
+// --- Clear browsing data ---
+$('cd-clear').addEventListener('click', async () => {
+  const opts = {
+    history: $('cd-history').checked,
+    cache: $('cd-cache').checked,
+    cookies: $('cd-cookies').checked,
+  };
+  const msg = $('cd-msg');
+  if (!opts.history && !opts.cache && !opts.cookies) {
+    msg.textContent = 'Pick something to clear.';
+    return;
+  }
+  const btn = $('cd-clear');
+  btn.disabled = true;
+  btn.textContent = 'Clearing…';
+  let r = {};
+  try {
+    r = await window.settings.clearData(opts);
+  } catch {
+    /* ignore */
+  }
+  btn.disabled = false;
+  btn.textContent = 'Clear now';
+  const parts = [];
+  if (r.history) parts.push('history');
+  if (r.cache) parts.push('cache');
+  if (r.cookies) parts.push('cookies');
+  msg.textContent = parts.length ? 'Cleared ' + parts.join(', ') + '.' : 'Nothing cleared.';
+  setTimeout(() => (msg.textContent = ''), 3000);
+});
+
 function renderToggles() {
   for (const row of document.querySelectorAll('.toggle-row')) {
     const key = row.dataset.key;

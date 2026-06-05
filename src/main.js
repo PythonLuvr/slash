@@ -522,6 +522,7 @@ function sendTabs() {
       suspended: !!t.suspended,
     })),
   );
+  scheduleSessionSave(); // persist the open-tab set for next launch
 }
 
 // --- Layout / visibility ---
@@ -1241,10 +1242,69 @@ function createWindow() {
   });
   layout();
 
-  createTab(); // opens on the hero
+  // Bring back last session's tabs (background tabs come back suspended/lazy).
+  restoreSession();
   // If launched as the default browser with a URL (e.g. clicked link), open it.
   const startUrl = urlFromArgv(process.argv);
   if (startUrl) createTab({ url: startUrl, activate: true });
+  if (!tabs.length) createTab(); // nothing restored and no link: a fresh hero tab
+}
+
+// --- Session restore: reopen the tabs you had open last time ---
+function sessionPath() {
+  return path.join(app.getPath('userData'), 'slash-session.json');
+}
+function saveSession() {
+  const open = tabs.filter((t) => !t.onHero && (t.url || t.suspended));
+  const list = open.map((t) => ({ url: t.url, title: t.title }));
+  const active = Math.max(0, open.findIndex((t) => t.id === activeTabId));
+  try {
+    fs.writeFileSync(sessionPath(), JSON.stringify({ tabs: list, active }), 'utf8');
+  } catch {
+    /* best effort */
+  }
+}
+let sessionSaveTimer = null;
+function scheduleSessionSave() {
+  if (sessionSaveTimer) return;
+  sessionSaveTimer = setTimeout(() => {
+    sessionSaveTimer = null;
+    saveSession();
+  }, 1500);
+}
+function restoreSession() {
+  let sess;
+  try {
+    sess = JSON.parse(fs.readFileSync(sessionPath(), 'utf8'));
+  } catch {
+    return;
+  }
+  if (!sess || !Array.isArray(sess.tabs) || !sess.tabs.length) return;
+  for (const t of sess.tabs) {
+    if (!t || !t.url || !/^https?:\/\//i.test(t.url)) continue;
+    // Create as a suspended (lazy) tab; it loads when activated/clicked.
+    const id = ++tabSeq;
+    tabs.push({
+      id,
+      view: null,
+      title: t.title || t.url,
+      url: t.url,
+      favicon: null,
+      onHero: false,
+      canGoBack: false,
+      canGoForward: false,
+      loading: false,
+      failedHttp: null,
+      blocked: 0,
+      onAIPage: false,
+      lastActive: Date.now(),
+      suspended: true,
+    });
+  }
+  if (!tabs.length) return;
+  const idx = Math.min(Math.max(0, sess.active | 0), tabs.length - 1);
+  activateTab(tabs[idx].id); // wakes + loads just the active one
+  layout();
 }
 
 // --- AI prompt building + routing (unchanged behavior) ---
@@ -1579,6 +1639,7 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => saveSession()); // flush the session before exiting
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
@@ -2292,6 +2353,35 @@ ipcMain.handle('app:stats', () => {
   }
   const asleep = tabs.filter((t) => t.suspended).length;
   return { memMB: Math.round(kb / 1024), tabs: tabs.length, asleep };
+});
+
+// --- IPC: clear browsing data ---
+ipcMain.handle('data:clear', async (_e, opts = {}) => {
+  const done = {};
+  if (opts.history) {
+    store.clearHistory();
+    done.history = true;
+    if (popKind === 'history' && popoverView) popoverView.webContents.send('history', []);
+  }
+  if (opts.cookies) {
+    try {
+      await session.defaultSession.clearStorageData({
+        storages: ['cookies', 'localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage'],
+      });
+      done.cookies = true;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (opts.cache) {
+    try {
+      await session.defaultSession.clearCache();
+      done.cache = true;
+    } catch {
+      /* ignore */
+    }
+  }
+  return done;
 });
 
 // --- IPC: settings ---

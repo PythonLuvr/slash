@@ -381,6 +381,35 @@ section h2 {
   color: #f08a8a;
 }
 
+/* Clear browsing data */
+.clear-data {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.cd-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.cd-opt input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.cd-msg {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* Stacked rows: label on top, control block below (migration). */
 .row.col {
   flex-direction: column;

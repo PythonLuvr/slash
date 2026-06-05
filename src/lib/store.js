@@ -1,33 +1,73 @@
 // Local data store for bookmarks and history. Lives in the OS app-data
 // directory (never the repo). Plain JSON, no external deps.
 
-const { app } = require('electron');
+const { app, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const HISTORY_CAP = 2000;
+const ENC_PREFIX = 'enc:v1:';
 
 function storePath() {
   return path.join(app.getPath('userData'), 'slash-data.json');
 }
 
-function read() {
+function emptyData() {
+  return { bookmarks: [], history: [], permissions: {}, httpAllow: [] };
+}
+
+function canEncrypt() {
   try {
-    const parsed = JSON.parse(fs.readFileSync(storePath(), 'utf8'));
-    return {
-      bookmarks: Array.isArray(parsed.bookmarks) ? parsed.bookmarks : [],
-      history: Array.isArray(parsed.history) ? parsed.history : [],
-      permissions: parsed.permissions && typeof parsed.permissions === 'object' ? parsed.permissions : {},
-      httpAllow: Array.isArray(parsed.httpAllow) ? parsed.httpAllow : [],
-    };
+    return safeStorage.isEncryptionAvailable();
   } catch {
-    return { bookmarks: [], history: [], permissions: {}, httpAllow: [] };
+    return false;
   }
 }
 
+// Bookmarks/history/permissions are encrypted at rest with the OS keystore
+// (same as API keys and the password vault). Legacy plaintext files are read
+// once and re-encrypted on the next write.
+function read() {
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(storePath(), 'utf8'));
+  } catch {
+    return emptyData();
+  }
+  let obj = raw;
+  try {
+    if (raw && typeof raw.enc === 'string' && raw.enc.startsWith(ENC_PREFIX)) {
+      if (!canEncrypt()) return emptyData();
+      obj = JSON.parse(safeStorage.decryptString(Buffer.from(raw.enc.slice(ENC_PREFIX.length), 'base64')));
+    } else if (raw && raw.plain && typeof raw.plain === 'object') {
+      obj = raw.plain;
+    }
+    // otherwise raw is a legacy plaintext object, used as-is
+  } catch {
+    return emptyData();
+  }
+  return {
+    bookmarks: Array.isArray(obj.bookmarks) ? obj.bookmarks : [],
+    history: Array.isArray(obj.history) ? obj.history : [],
+    permissions: obj.permissions && typeof obj.permissions === 'object' ? obj.permissions : {},
+    httpAllow: Array.isArray(obj.httpAllow) ? obj.httpAllow : [],
+  };
+}
+
 function write(data) {
+  const json = JSON.stringify(data);
+  let onDisk;
+  if (canEncrypt()) {
+    try {
+      onDisk = { enc: ENC_PREFIX + safeStorage.encryptString(json).toString('base64') };
+    } catch {
+      onDisk = { plain: data };
+    }
+  } else {
+    onDisk = { plain: data };
+  }
   fs.mkdirSync(path.dirname(storePath()), { recursive: true });
-  fs.writeFileSync(storePath(), JSON.stringify(data, null, 2), 'utf8');
+  fs.writeFileSync(storePath(), JSON.stringify(onDisk), 'utf8');
 }
 
 // --- Bookmarks ---

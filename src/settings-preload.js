@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('settings', {
   setHeroEngines: (ids) => ipcRenderer.send('hero:engines-set', ids),
   addEngine: (label, url) => ipcRenderer.invoke('engine:add', { label, url }),
   removeEngine: (id) => ipcRenderer.invoke('engine:remove', id),
+  clearData: (opts) => ipcRenderer.invoke('data:clear', opts),
   // Migration (bookmarks / history / cookies) from another browser.
   migrateSources: () => ipcRenderer.invoke('migrate:sources'),
   migrateRun: (id, types) => ipcRenderer.invoke('migrate:run', { id, types }),
