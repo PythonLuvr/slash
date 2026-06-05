@@ -509,7 +509,7 @@ function showNextPermission() {
     if (S.permView) S.permView.setVisible(false);
     return;
   }
-  if (!S.permView) return;
+  ensureView('permView');
   const { width } = S.win.getContentBounds();
   S.permView.setBounds({ x: 12, y: S.CHROME_HEIGHT + 6, width: Math.min(PERM_W, width - 24), height: PERM_H });
   S.permView.setVisible(true);
@@ -608,7 +608,9 @@ async function applyAccent(view) {
   }
 }
 function broadcastAccent() {
-  for (const v of [S.chromeView, S.heroView, S.interstitialView, S.settingsView, S.aiPageView, S.aiView, S.popoverView, S.findView, S.ctxView, S.permView]) applyAccent(v);
+  for (const W of windows) {
+    for (const key of Object.keys(VIEW_DEFS)) if (W[key]) applyAccent(W[key]);
+  }
 }
 
 // --- Downloads ---
@@ -718,7 +720,7 @@ function layout() {
   if (S.settingsView) S.settingsView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   if (S.aiPageView) S.aiPageView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   for (const t of S.tabs) if (t.view) t.view.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  S.aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
+  if (S.aiView) S.aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
   if (S.popKind && S.popoverView) {
     const s = POP_SIZES[S.popKind];
     const { x, y } = popoverPos(S.popKind, s, width);
@@ -738,6 +740,7 @@ function updateContentVisibility() {
   const at = activeTab();
   if (S.settingsView) S.settingsView.setVisible(S.settingsOpen);
   const onInt = !S.settingsOpen && !!(at && at.failedHttp);
+  if (onInt) ensureView('interstitialView');
   if (S.interstitialView) {
     S.interstitialView.setVisible(onInt);
     if (onInt) {
@@ -760,6 +763,7 @@ function updateContentVisibility() {
 function goAIPage(opts = {}) {
   const at = activeTab();
   if (!at) return;
+  ensureView('aiPageView');
   at.onAIPage = true;
   at.onHero = false;
   S.settingsOpen = false;
@@ -772,10 +776,11 @@ function goAIPage(opts = {}) {
 }
 
 function openSettingsPage(section) {
+  ensureView('settingsView');
   S.settingsOpen = true;
-  if (S.settingsView) S.settingsView.webContents.send('settings:show', typeof section === 'string' ? section : null);
+  S.settingsView.webContents.send('settings:show', typeof section === 'string' ? section : null);
   updateContentVisibility();
-  if (S.settingsView) S.settingsView.webContents.focus();
+  S.settingsView.webContents.focus();
 }
 
 function closeSettingsPage() {
@@ -796,6 +801,7 @@ function raiseChrome() {
 
 // --- Find-in-page ---
 function showFind() {
+  ensureView('findView');
   S.findOpen = true;
   layout();
   S.findView.setVisible(true);
@@ -861,7 +867,7 @@ function buildContextMenu(p) {
 }
 
 function showContext(params) {
-  if (!S.ctxView) return;
+  ensureView('ctxView');
   S.ctxParams = params;
   const items = buildContextMenu(params);
   let h = CTX_FRAME;
@@ -955,6 +961,7 @@ function sendBookmarks() {
 
 // --- Top-right popovers ---
 function sendSiteinfo() {
+  if (!S.popoverView) return;
   const at = activeTab();
   const url = at && !at.onHero ? at.view.webContents.getURL() : '';
   let host = '';
@@ -976,6 +983,7 @@ function sendSiteinfo() {
 function showPopover(kind) {
   const s = POP_SIZES[kind];
   if (!s) return;
+  ensureView('popoverView');
   const { width } = S.win.getContentBounds();
   const { x, y } = popoverPos(kind, s, width);
   S.popoverView.setBounds({ x, y, width: s.w, height: s.h });
@@ -1020,6 +1028,7 @@ function sendSetup() {
 }
 
 function sendShield() {
+  if (!S.popoverView) return;
   const at = activeTab();
   S.popoverView.webContents.send('shield', {
     count: at ? at.blocked || 0 : 0,
@@ -1330,9 +1339,10 @@ function goHome() {
 // --- AI panel ---
 function toggleAI(force) {
   S.aiOpen = typeof force === 'boolean' ? force : !S.aiOpen;
-  S.aiView.setVisible(S.aiOpen);
+  if (S.aiOpen) ensureView('aiView');
+  if (S.aiView) S.aiView.setVisible(S.aiOpen);
   layout();
-  if (S.aiOpen) S.aiView.webContents.focus();
+  if (S.aiOpen && S.aiView) S.aiView.webContents.focus();
   sendState();
 }
 
@@ -1373,10 +1383,54 @@ function attachShortcuts(wc) {
   });
 }
 
+// Per-window UI views. Only the toolbar (chrome) and start page (hero) are built
+// up front; the rest (AI panel + page, settings, find bar, the menu/context/
+// permission overlays, HTTPS interstitial) are created the first time they are
+// shown. This avoids paying ~8 extra Chromium renderer processes of memory per
+// window for views you may never open.
+const VIEW_DEFS = {
+  heroView: ['hero-preload.js', 'hero.html'],
+  chromeView: ['preload.js', 'index.html'],
+  aiView: ['ai-preload.js', 'ai.html'],
+  aiPageView: ['ai-preload.js', 'ai-page.html'],
+  settingsView: ['settings-preload.js', 'settings.html'],
+  interstitialView: ['interstitial-preload.js', 'interstitial.html'],
+  popoverView: ['overlay-preload.js', 'overlay.html'],
+  findView: ['find-preload.js', 'find.html'],
+  ctxView: ['context-preload.js', 'context.html'],
+  permView: ['permission-preload.js', 'permission.html'],
+};
+function makeView(key, visible) {
+  const [preload, html] = VIEW_DEFS[key];
+  const v = new WebContentsView({ webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, preload) } });
+  S[key] = v;
+  S.win.contentView.addChildView(v);
+  v.webContents.loadFile(path.join(__dirname, html));
+  v.setVisible(!!visible);
+  attachShortcuts(v.webContents);
+  v.webContents.on('did-finish-load', () => applyAccent(v));
+  v.webContents.on('will-navigate', (e) => e.preventDefault());
+  v.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  if (key === 'popoverView') {
+    v.webContents.on('blur', () => {
+      if (S.popKind !== 'setup') hidePopover();
+    });
+  }
+  if (key === 'ctxView') v.webContents.on('blur', hideContext);
+  return v;
+}
+// Lazily create a view the first time it's needed, keeping chrome/overlays on top.
+function ensureView(key) {
+  if (S[key]) return S[key];
+  const v = makeView(key, false);
+  raiseChrome(); // the new view was added on top; restore z-order
+  return v;
+}
+
 function createBrowserWindow(opts = {}) {
   // Per-window state lives on W; S points at the window currently being operated
-  // on. Views (S.chromeView etc.) are assigned below. S.win/S.tabs are still module
-  // globals in this batch and move onto W in the next.
+  // on. Views are created lazily (see makeView/ensureView); only chrome + hero
+  // are built up front.
   const W = {};
   W.profileId = opts.profileId || 'default';
   windows.push(W);
@@ -1412,89 +1466,9 @@ function createBrowserWindow(opts = {}) {
   // profile; many windows of a profile share it).
   ensureExtensions(W.profileId);
 
-  S.heroView = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'hero-preload.js') },
-  });
-  S.win.contentView.addChildView(S.heroView);
-  S.heroView.webContents.loadFile(path.join(__dirname, 'hero.html'));
-  S.heroView.setVisible(false);
-
-  S.interstitialView = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'interstitial-preload.js') },
-  });
-  S.win.contentView.addChildView(S.interstitialView);
-  S.interstitialView.webContents.loadFile(path.join(__dirname, 'interstitial.html'));
-  S.interstitialView.setVisible(false);
-
-  S.settingsView = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'settings-preload.js') },
-  });
-  S.win.contentView.addChildView(S.settingsView);
-  S.settingsView.webContents.loadFile(path.join(__dirname, 'settings.html'));
-  S.settingsView.setVisible(false);
-
-  S.aiPageView = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
-  });
-  S.win.contentView.addChildView(S.aiPageView);
-  S.aiPageView.webContents.loadFile(path.join(__dirname, 'ai-page.html'));
-  S.aiPageView.setVisible(false);
-
-  S.aiView = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
-  });
-  S.win.contentView.addChildView(S.aiView);
-  S.aiView.webContents.loadFile(path.join(__dirname, 'ai.html'));
-  S.aiView.setVisible(false);
-
-  S.chromeView = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'preload.js') },
-  });
-  S.win.contentView.addChildView(S.chromeView);
-  S.chromeView.webContents.loadFile(path.join(__dirname, 'index.html'));
-
-  S.popoverView = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'overlay-preload.js') },
-  });
-  S.win.contentView.addChildView(S.popoverView);
-  S.popoverView.webContents.loadFile(path.join(__dirname, 'overlay.html'));
-  S.popoverView.setVisible(false);
-  // Close on click-away, except the first-run setup picker: opening Windows
-  // Default Apps steals focus, and we don't want that to abort the import step.
-  S.popoverView.webContents.on('blur', () => {
-    if (S.popKind !== 'setup') hidePopover();
-  });
-
-  S.findView = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'find-preload.js') },
-  });
-  S.win.contentView.addChildView(S.findView);
-  S.findView.webContents.loadFile(path.join(__dirname, 'find.html'));
-  S.findView.setVisible(false);
-
-  S.ctxView = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'context-preload.js') },
-  });
-  S.win.contentView.addChildView(S.ctxView);
-  S.ctxView.webContents.loadFile(path.join(__dirname, 'context.html'));
-  S.ctxView.setVisible(false);
-  S.ctxView.webContents.on('blur', hideContext); // close on click-away
-
-  S.permView = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'permission-preload.js') },
-  });
-  S.win.contentView.addChildView(S.permView);
-  S.permView.webContents.loadFile(path.join(__dirname, 'permission.html'));
-  S.permView.setVisible(false);
-
-  for (const v of [S.heroView, S.interstitialView, S.settingsView, S.aiPageView, S.aiView, S.chromeView, S.popoverView, S.findView, S.ctxView, S.permView]) {
-    attachShortcuts(v.webContents);
-    v.webContents.on('did-finish-load', () => applyAccent(v));
-    // Trusted chrome must never navigate itself or spawn windows. Real web
-    // navigation only happens inside the untrusted per-tab page views.
-    v.webContents.on('will-navigate', (e) => e.preventDefault());
-    v.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  }
+  // Start page (below) and the toolbar (on top). Everything else is lazy.
+  makeView('heroView', false);
+  makeView('chromeView', true);
 
   S.win.on('focus', () => {
     focusedW = W;
