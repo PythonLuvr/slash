@@ -14,6 +14,13 @@
   <img src="https://img.shields.io/badge/engine-Chromium%20via%20Electron-1c1c1f" alt="Engine" />
 </p>
 
+<p align="center">
+  <img src="assets/hero.png" width="840" alt="Slash start page with the /slash brand, search, and engine quick-picks" />
+</p>
+<p align="center">
+  <img src="assets/browsing.png" width="840" alt="Slash browsing a real web page" />
+</p>
+
 ---
 
 ## Why Slash
