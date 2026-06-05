@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('overlay', {
   clearPermission: (origin, perm) => ipcRenderer.send('perm:clear', { origin, perm }),
   toggleBlocker: () => ipcRenderer.send('blocker:toggle'),
   stats: () => ipcRenderer.invoke('app:stats'),
+  setRamLimit: (mb) => ipcRenderer.send('ram:set-limit', mb),
   profile: () => ipcRenderer.invoke('profile:get'),
   profilesList: () => ipcRenderer.invoke('profiles:list'),
   openProfileWindow: (id) => ipcRenderer.send('profile:open-window', id),

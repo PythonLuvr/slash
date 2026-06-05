@@ -135,10 +135,24 @@ function renderStats() {
       const tabs = `${s.tabs} tab${s.tabs === 1 ? '' : 's'}`;
       const asleep = s.asleep ? `, ${s.asleep} asleep` : '';
       el.textContent = `${s.memMB} MB · ${tabs}${asleep}`;
+      const sel = $('menu-ram');
+      if (sel) sel.value = String(typeof s.ramLimitMB === 'number' ? s.ramLimitMB : 500);
     })
     .catch(() => {
       el.textContent = '';
     });
+}
+
+// Quick memory-limit picker in the menu (mirrors Settings -> Performance).
+{
+  const ramSel = $('menu-ram');
+  if (ramSel) {
+    ramSel.addEventListener('change', () => {
+      window.overlay.setRamLimit(parseInt(ramSel.value, 10) || 0);
+    });
+    // Clicking the select shouldn't bubble up and close the menu.
+    ramSel.addEventListener('click', (e) => e.stopPropagation());
+  }
 }
 
 const ACTIONS = {

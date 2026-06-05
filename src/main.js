@@ -90,7 +90,7 @@ const upgraded = new Map(); // upgraded https url -> original http url (shared)
 
 // Popover sizes (the view is sized to the card).
 const POP_SIZES = {
-  menu: { w: 252, h: 436 },
+  menu: { w: 252, h: 488 },
   profile: { w: 262, h: 300 },
   downloads: { w: 270, h: 230 },
   history: { w: 380, h: 460 },
@@ -2888,7 +2888,13 @@ handleWin('app:stats', () => {
     /* ignore */
   }
   const asleep = S.tabs.filter((t) => t.suspended).length;
-  return { memMB: Math.round(kb / 1024), tabs: S.tabs.length, asleep };
+  return { memMB: Math.round(kb / 1024), tabs: S.tabs.length, asleep, ramLimitMB: readSettings().ramLimitMB };
+});
+
+// Quick RAM cap change from the menu (mirrors Settings -> Performance).
+onWin('ram:set-limit', (_e, mb) => {
+  writeSettings({ ramLimitMB: typeof mb === 'number' ? mb : 0 });
+  enforceRamLimit();
 });
 
 // --- IPC: clear browsing data ---
