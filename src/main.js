@@ -144,6 +144,17 @@ let activeTabId = null;
 let tabSeq = 0;
 const closedStack = [];
 
+// Multi-window registry. During the multi-window refactor each browser window is
+// represented by a context object W (see createBrowserWindow). Phase 1 still keeps
+// the single-window globals above as the source of truth for window 0; later steps
+// move that state onto W and thread it through the per-window functions.
+const windows = [];
+let focusedW = null;
+function focusedWindow() {
+  if (focusedW && windows.includes(focusedW)) return focusedW;
+  return windows.find((W) => W.win && !W.win.isDestroyed() && W.win.isFocused()) || windows[0] || null;
+}
+
 function activeTab() {
   return tabs.find((t) => t.id === activeTabId) || null;
 }
@@ -1240,7 +1251,7 @@ function attachShortcuts(wc) {
   });
 }
 
-function createWindow() {
+function createBrowserWindow() {
   win = new BaseWindow({
     width: 1280,
     height: 860,
@@ -1360,6 +1371,28 @@ function createWindow() {
     v.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   }
 
+  // Register this window. Phase 1: the module globals above remain the source of
+  // truth for the single window; W just holds handles so windows[]/focusedWindow()
+  // and (later) windowFromEvent() can resolve it. Step 1.2 moves state onto W.
+  const W = {
+    win,
+    chromeView,
+    heroView,
+    interstitialView,
+    settingsView,
+    aiPageView,
+    aiView,
+    popoverView,
+    findView,
+    ctxView,
+    permView,
+  };
+  windows.push(W);
+  focusedW = W;
+  win.on('focus', () => {
+    focusedW = W;
+  });
+
   win.on('resize', () => {
     hideContext();
     layout();
@@ -1372,6 +1405,7 @@ function createWindow() {
   const startUrl = urlFromArgv(process.argv);
   if (startUrl) createTab({ url: startUrl, activate: true });
   if (!tabs.length) createTab(); // nothing restored and no link: a fresh hero tab
+  return W;
 }
 
 // --- Session restore: reopen the tabs you had open last time ---
@@ -1740,7 +1774,7 @@ app.whenReady().then(() => {
   applyDoh();
   setupPermissions();
   setupDownloads();
-  createWindow();
+  createBrowserWindow();
   setupBlocker();
   registerAsBrowser(); // make Slash selectable in Windows Default Apps (packaged)
   loadSavedExtensions(); // re-load unpacked extensions the user added
@@ -1771,7 +1805,7 @@ app.whenReady().then(() => {
 
   setupUpdater();
   app.on('activate', () => {
-    if (BaseWindow.getAllWindows().length === 0) createWindow();
+    if (BaseWindow.getAllWindows().length === 0) createBrowserWindow();
   });
 });
 
