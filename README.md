@@ -15,7 +15,10 @@
 </p>
 
 <p align="center">
-  <img src="assets/hero.png" width="860" alt="Slash start page with the /slash brand, search, and engine quick-picks" />
+  <img src="assets/hero.png" width="860" alt="Slash start page in Search mode, with the /slash brand and engine quick-picks" />
+</p>
+<p align="center">
+  <img src="assets/hero-ai.png" width="860" alt="Slash start page in Ask AI mode, choosing between Claude, Gemini, and ChatGPT" />
 </p>
 
 ---

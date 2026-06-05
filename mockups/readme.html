@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Slash</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap');
+      :root {
+        --paper: #1c1c1f;
+        --titlebar: #141416;
+        --raised: #2a2a2e;
+        --raised-2: #34343a;
+        --ink: #e8e8ec;
+        --muted: #9a9aa3;
+        --faint: #6a6a72;
+        --border: rgba(255, 255, 255, 0.08);
+        --border-strong: rgba(255, 255, 255, 0.14);
+        --accent: #f1cb53;
+        --accent-hover: #e0b63d;
+        --accent-soft: rgba(241, 203, 83, 0.16);
+        --on-accent: #18181b;
+        --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        font-family: var(--font); background: var(--paper); color: var(--ink);
+        display: flex; flex-direction: column; overflow: hidden;
+        -webkit-font-smoothing: antialiased; user-select: none;
+      }
+
+      /* titlebar */
+      .titlebar { height: 38px; background: var(--titlebar); display: flex; align-items: center; padding: 0 10px; }
+      .titlebar .t { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); flex: 1; }
+      .titlebar .logo { color: var(--accent); font-weight: 700; }
+      .winctl { display: flex; gap: 4px; color: var(--muted); }
+      .winctl span { width: 28px; text-align: center; font-size: 12px; }
+
+      /* tab strip */
+      .tabs { height: 40px; background: var(--titlebar); display: flex; align-items: flex-end; gap: 2px; padding: 0 8px; }
+      .home { width: 30px; height: 30px; margin-bottom: 4px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+      .tab { height: 34px; min-width: 150px; max-width: 210px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 9px 9px 0 0; color: var(--muted); font-size: 12.5px; }
+      .tab.active { background: var(--paper); color: var(--ink); }
+      .fav { width: 15px; height: 15px; border-radius: 4px; flex: 0 0 auto; object-fit: cover; }
+      .fav.nt { display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 11px; }
+      .tab .ttl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tab .x { width: 18px; height: 18px; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 12px; }
+      .newtab { width: 28px; height: 28px; margin-bottom: 4px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 17px; }
+
+      /* toolbar */
+      .toolbar { height: 48px; background: var(--paper); display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 1px solid var(--border); }
+      .nav { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--ink); font-size: 17px; }
+      .nav.off { color: var(--faint); }
+      .engine { display: inline-flex; align-items: center; gap: 3px; height: 28px; padding: 0 6px; border-radius: 7px; }
+      .engine .ef { width: 16px; height: 16px; border-radius: 4px; }
+      .engine .car { font-size: 8px; color: var(--muted); }
+      .address { flex: 1; height: 36px; display: flex; align-items: center; padding: 0 14px; background: var(--raised); border: 1px solid transparent; border-radius: 18px; color: var(--muted); font-size: 13px; }
+      .tool { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 15px; }
+      .tool.ai { color: var(--accent); }
+      .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--raised-2); display: flex; align-items: center; justify-content: center; }
+      .avatar svg { width: 16px; height: 16px; fill: var(--faint); }
+
+      /* bookmarks */
+      .bookmarks { height: 34px; background: var(--paper); display: flex; align-items: center; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--border); }
+      .bm { display: flex; align-items: center; gap: 7px; padding: 4px 9px; border-radius: 6px; font-size: 12px; color: var(--muted); }
+      .bm .d { width: 14px; height: 14px; border-radius: 4px; object-fit: cover; }
+
+      /* hero */
+      .page { flex: 1; background: radial-gradient(circle at 50% 118%, rgba(241,203,83,0.10), transparent 55%), linear-gradient(180deg, #1a1a1d 0%, #111113 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; padding: 40px; }
+      .brand { font-family: 'Space Grotesk', system-ui, sans-serif; display: flex; align-items: baseline; font-size: 56px; font-weight: 500; letter-spacing: -1.5px; }
+      .brand .sl { color: var(--accent); font-weight: 700; }
+      .toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+      .seg { display: inline-flex; align-items: center; gap: 6px; padding: 7px 15px; color: var(--muted); font-size: 13px; }
+      .seg.active { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+      .box { width: min(600px, 86vw); height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: rgba(255,255,255,0.05); border: 1px solid var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); border-radius: 12px; color: var(--muted); font-size: 15px; backdrop-filter: blur(14px); }
+      .box .ic { color: var(--accent); font-size: 15px; }
+      .chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+      .chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 13px 0 9px; border: 1px solid var(--border); border-radius: 15px; color: var(--muted); font-size: 12.5px; }
+      .chip.active { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+      .chip .cf { width: 16px; height: 16px; border-radius: 4px; object-fit: cover; }
+      .chip .spark { color: var(--accent); font-size: 13px; }
+      .chip.add { padding: 0; width: 30px; justify-content: center; color: var(--muted); font-size: 16px; }
+      .tile { width: 116px; height: 78px; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); font-size: 24px; }
+    </style>
+  </head>
+  <body>
+    <div class="titlebar">
+      <div class="t"><span class="logo">/</span> Slash</div>
+      <div class="winctl"><span>&#9472;</span><span>&#9744;</span><span>&#10005;</span></div>
+    </div>
+
+    <div class="tabs">
+      <div class="home">&#8962;</div>
+      <div class="tab active"><span class="fav nt">&#10022;</span><span class="ttl">New tab</span><span class="x">&#10005;</span></div>
+      <div class="tab"><img class="fav" src="https://icons.duckduckgo.com/ip3/github.com.ico" /><span class="ttl">GitHub</span><span class="x">&#10005;</span></div>
+      <div class="tab"><img class="fav" src="https://icons.duckduckgo.com/ip3/news.ycombinator.com.ico" /><span class="ttl">Hacker News</span><span class="x">&#10005;</span></div>
+      <div class="newtab">&#43;</div>
+    </div>
+
+    <div class="toolbar">
+      <div class="nav">&#8249;</div>
+      <div class="nav off">&#8250;</div>
+      <div class="nav">&#10227;</div>
+      <div class="engine"><img class="ef" src="https://icons.duckduckgo.com/ip3/duckduckgo.com.ico" /><span class="car">&#9662;</span></div>
+      <div class="address">Search or enter address</div>
+      <div class="tool">&#128737;</div>
+      <div class="tool">&#9734;</div>
+      <div class="tool">&#8595;</div>
+      <div class="tool ai">&#10022;</div>
+      <div class="avatar"><svg viewBox="0 0 24 24"><path d="M12 12c2.7 0 5-2.2 5-5s-2.3-5-5-5-5 2.2-5 5 2.3 5 5 5zm0 2c-3.3 0-10 1.7-10 5v3h20v-3c0-3.3-6.7-5-10-5z"/></svg></div>
+      <div class="tool">&#8942;</div>
+    </div>
+
+    <div class="bookmarks">
+      <div class="bm"><img class="d" src="https://icons.duckduckgo.com/ip3/github.com.ico" />GitHub</div>
+      <div class="bm"><img class="d" src="https://icons.duckduckgo.com/ip3/wikipedia.org.ico" />Wikipedia</div>
+      <div class="bm"><img class="d" src="https://icons.duckduckgo.com/ip3/news.ycombinator.com.ico" />Hacker News</div>
+      <div class="bm"><img class="d" src="https://icons.duckduckgo.com/ip3/developer.mozilla.org.ico" />MDN Web Docs</div>
+      <div class="bm"><img class="d" src="https://icons.duckduckgo.com/ip3/youtube.com.ico" />YouTube</div>
+    </div>
+
+    <div class="page">
+      <div class="brand"><span class="sl">/</span>slash</div>
+      <div class="toggle">
+        <span class="seg">&#128269; Search</span>
+        <span class="seg active">&#10022; Ask AI</span>
+      </div>
+      <div class="box"><span class="ic">&#10022;</span> Ask Slash AI&hellip;</div>
+      <div class="chips">
+        <span class="chip active"><img class="cf" src="https://icons.duckduckgo.com/ip3/claude.ai.ico" /> Claude</span>
+        <span class="chip"><img class="cf" src="https://icons.duckduckgo.com/ip3/gemini.google.com.ico" /> Gemini</span>
+        <span class="chip"><img class="cf" src="https://icons.duckduckgo.com/ip3/chatgpt.com.ico" /> ChatGPT</span>
+      </div>
+      <div class="tile">&#43;</div>
+    </div>
+  </body>
+</html>
