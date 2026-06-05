@@ -15,7 +15,7 @@ const favicons = require('./lib/favicons');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
 const { installChromeWebStore } = require('electron-chrome-web-store');
 
-let extensions = null; // Chrome-extension API layer (set up on the window)
+const extByProfile = new Map(); // one ElectronChromeExtensions per profile session
 
 app.setName('Slash');
 // Windows taskbar / notification identity (so it groups as Slash, not Electron).
@@ -373,6 +373,97 @@ function ensurePrivateSession() {
   }
   privateReady = true;
 }
+// Per-profile sessions. The default profile keeps session.defaultSession (so its
+// existing logins/cookies survive); every other profile gets its own persistent
+// partition, isolated cookies/storage/cache. Each profile session is hardened
+// (permissions, DoH, ad/tracker blocking) the first time it is used.
+const profileReady = new Set();
+function profilePartition(profileId) {
+  return profileId === 'default' ? null : 'persist:profile-' + profileId;
+}
+function profileSession(profileId) {
+  const part = profilePartition(profileId);
+  return part ? session.fromPartition(part) : session.defaultSession;
+}
+function ensureProfileSession(profileId) {
+  if (profileId === 'default' || profileReady.has(profileId)) return;
+  const ps = profileSession(profileId);
+  try {
+    setupPermissions(ps);
+    applyDoh(ps);
+    if (readSettings().blockAds && blocker) blocker.enableBlockingInSession(ps);
+  } catch {
+    /* best effort */
+  }
+  profileReady.add(profileId);
+}
+
+// One Chrome-extension API layer per profile session (content blockers, the Web
+// Store, etc.). Created on first use; tabs of that profile register with it so
+// chrome.tabs works. Extensions installed in one profile don't appear in others.
+function ensureExtensions(profileId) {
+  if (extByProfile.has(profileId)) return extByProfile.get(profileId);
+  const ses = profileSession(profileId);
+  const winOf = () =>
+    windows.find((x) => x.profileId === profileId && x.win && !x.win.isDestroyed()) || focusedWindow();
+  const tabOf = (wc) => {
+    for (const W of windows) {
+      if (W.profileId !== profileId) continue;
+      const t = W.tabs.find((x) => x.view && x.view.webContents === wc);
+      if (t) return { W, t };
+    }
+    return null;
+  };
+  let inst = null;
+  try {
+    ElectronChromeExtensions.handleCRXProtocol(ses);
+    inst = new ElectronChromeExtensions({
+      license: 'GPL-3.0',
+      session: ses,
+      createTab: (details) => {
+        const W = winOf();
+        useWindow(W);
+        const id = createTab({ url: details.url, activate: details.active !== false });
+        const t = W.tabs.find((x) => x.id === id);
+        return Promise.resolve([t.view.webContents, W.win]);
+      },
+      selectTab: (wc) => {
+        const hit = tabOf(wc);
+        if (hit) {
+          useWindow(hit.W);
+          activateTab(hit.t.id);
+        }
+      },
+      removeTab: (wc) => {
+        const hit = tabOf(wc);
+        if (hit) {
+          useWindow(hit.W);
+          closeTab(hit.t.id);
+        }
+      },
+      createWindow: () => Promise.resolve(createBrowserWindow({ profileId }).win),
+      removeWindow: (bw) => {
+        try {
+          if (bw && !bw.isDestroyed()) bw.destroy();
+        } catch {
+          /* ignore */
+        }
+      },
+    });
+  } catch {
+    inst = null;
+  }
+  extByProfile.set(profileId, inst);
+  // Load this profile's saved unpacked extensions and enable Web Store installs.
+  try {
+    loadSavedExtensions(profileId);
+    installChromeWebStore({ session: ses }).catch(() => {});
+  } catch {
+    /* best effort */
+  }
+  return inst;
+}
+
 function hasPrivateTabs() {
   return S.tabs.some((t) => t.private);
 }
@@ -934,16 +1025,24 @@ function attachTabView(tab) {
   const myW = S; // the window this tab belongs to; async events re-select it
   tab.W = myW;
   const webPreferences = { ...SECURE_PREFS, preload: path.join(__dirname, 'tab-preload.js') };
-  if (tab.private) webPreferences.partition = PRIVATE_PARTITION; // in-memory, no traces
+  if (tab.private) {
+    webPreferences.partition = PRIVATE_PARTITION; // in-memory, no traces
+  } else if (myW.profileId && myW.profileId !== 'default') {
+    ensureProfileSession(myW.profileId); // isolated cookies/logins per profile
+    webPreferences.partition = profilePartition(myW.profileId);
+  }
   const view = new WebContentsView({ webPreferences });
   tab.view = view;
   const wc = view.webContents;
-  // Track this tab for the Chrome-extension APIs (private tabs stay out).
-  if (extensions && !tab.private) {
-    try {
-      extensions.addTab(wc, myW.win);
-    } catch {
-      /* ignore */
+  // Track this tab for its profile's Chrome-extension APIs (private tabs stay out).
+  if (!tab.private) {
+    const ext = extByProfile.get(myW.profileId);
+    if (ext) {
+      try {
+        ext.addTab(wc, myW.win);
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -1097,9 +1196,10 @@ function activateTab(id) {
   tab.lastActive = Date.now();
   S.activeTabId = id;
   S.settingsOpen = false;
-  if (extensions && tab.view) {
+  const ext = extByProfile.get(S.profileId);
+  if (ext && tab.view) {
     try {
-      extensions.selectTab(tab.view.webContents);
+      ext.selectTab(tab.view.webContents);
     } catch {
       /* ignore */
     }
@@ -1287,32 +1387,9 @@ function createBrowserWindow(opts = {}) {
     icon: path.join(__dirname, 'icon.png'),
   });
 
-  // Chrome-extension API support (content blockers, etc.). Tabs are registered
-  // with it in attachTabView/activateTab so chrome.tabs works.
-  try {
-    ElectronChromeExtensions.handleCRXProtocol(session.defaultSession);
-    extensions = new ElectronChromeExtensions({
-      license: 'GPL-3.0',
-      session: session.defaultSession,
-      createTab: (details) => {
-        const id = createTab({ url: details.url, activate: details.active !== false });
-        const t = S.tabs.find((x) => x.id === id);
-        return Promise.resolve([t.view.webContents, S.win]);
-      },
-      selectTab: (wc) => {
-        const t = S.tabs.find((x) => x.view && x.view.webContents === wc);
-        if (t) activateTab(t.id);
-      },
-      removeTab: (wc) => {
-        const t = S.tabs.find((x) => x.view && x.view.webContents === wc);
-        if (t) closeTab(t.id);
-      },
-      createWindow: () => Promise.resolve(S.win), // single window: reuse it
-      removeWindow: () => {},
-    });
-  } catch {
-    extensions = null;
-  }
+  // Chrome-extension API support for this window's profile (created once per
+  // profile; many windows of a profile share it).
+  ensureExtensions(W.profileId);
 
   S.heroView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'hero-preload.js') },
@@ -1831,10 +1908,8 @@ app.whenReady().then(() => {
   restoreWindows();
   setupBlocker();
   registerAsBrowser(); // make Slash selectable in Windows Default Apps (packaged)
-  loadSavedExtensions(); // re-load unpacked extensions the user added
-  // Enable installing extensions straight from the Chrome Web Store (and reload
-  // previously store-installed ones). The library manages their storage.
-  installChromeWebStore({ session: session.defaultSession }).catch(() => {});
+  // Per-profile extensions (load + Web Store) are set up by ensureExtensions when
+  // each profile's first window opens.
   favicons.seedBrands(); // pre-cache the fixed brand icons locally (no 3rd party)
   setInterval(maybeSuspendIdleTabs, 60 * 1000); // free idle background S.tabs' RAM
 
@@ -2711,15 +2786,16 @@ handleWin('data:clear', async (_e, opts = {}) => {
 // --- IPC: Chrome extensions (Web Store / load unpacked / list / remove) ---
 // Electron 35+ moved the extension methods under session.extensions; fall back
 // to the (deprecated) session methods on older versions.
-function extApi() {
-  const ses = session.defaultSession;
-  return ses.extensions || ses;
+function extApi(ses) {
+  const s = ses || session.defaultSession;
+  return s.extensions || s;
 }
-function loadSavedExtensions() {
-  for (const dir of readSettings().extensions || []) {
+function loadSavedExtensions(profileId = 'default') {
+  const ses = profileSession(profileId);
+  for (const dir of readSettings(profileId).extensions || []) {
     try {
       if (fs.existsSync(dir)) {
-        extApi().loadExtension(dir, { allowFileAccess: true }).catch(() => {});
+        extApi(ses).loadExtension(dir, { allowFileAccess: true }).catch(() => {});
       }
     } catch {
       /* ignore a bad path */
@@ -2727,6 +2803,7 @@ function loadSavedExtensions() {
   }
 }
 handleWin('extensions:load', async () => {
+  const pid = S.profileId;
   const r = await dialog.showOpenDialog(S.win, {
     title: 'Load an unpacked extension (the folder with its manifest.json)',
     properties: ['openDirectory'],
@@ -2734,9 +2811,9 @@ handleWin('extensions:load', async () => {
   if (r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };
   const dir = r.filePaths[0];
   try {
-    const ext = await extApi().loadExtension(dir, { allowFileAccess: true });
-    const list = readSettings().extensions || [];
-    if (!list.includes(dir)) writeSettings({ extensions: list.concat([dir]) });
+    const ext = await extApi(profileSession(pid)).loadExtension(dir, { allowFileAccess: true });
+    const list = readSettings(pid).extensions || [];
+    if (!list.includes(dir)) writeSettings({ extensions: list.concat([dir]) }, pid);
     return { ok: true, ext: { id: ext.id, name: ext.name, version: ext.version } };
   } catch (e) {
     return { error: String(e.message || e) };
@@ -2748,7 +2825,7 @@ handleWin('extensions:store', () => {
 });
 handleWin('extensions:list', () => {
   try {
-    return extApi()
+    return extApi(profileSession(S.profileId))
       .getAllExtensions()
       .map((e) => ({ id: e.id, name: e.name, version: e.version, path: e.path }));
   } catch {
@@ -2756,12 +2833,12 @@ handleWin('extensions:list', () => {
   }
 });
 handleWin('extensions:remove', (_e, id) => {
+  const pid = S.profileId;
   try {
-    const ext = extApi()
-      .getAllExtensions()
-      .find((x) => x.id === id);
-    extApi().removeExtension(id);
-    if (ext) writeSettings({ extensions: (readSettings().extensions || []).filter((p) => p !== ext.path) });
+    const api = extApi(profileSession(pid));
+    const ext = api.getAllExtensions().find((x) => x.id === id);
+    api.removeExtension(id);
+    if (ext) writeSettings({ extensions: (readSettings(pid).extensions || []).filter((p) => p !== ext.path) }, pid);
     return { ok: true };
   } catch (e) {
     return { error: String(e.message || e) };
