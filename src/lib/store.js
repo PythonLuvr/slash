@@ -72,6 +72,24 @@ function clearHistory() {
   data.history = [];
   write(data);
 }
+// Bulk import (from another browser). Merges by url, keeps each entry's own
+// visit time, newest first, capped. Returns how many new urls were added.
+function importHistory(entries) {
+  if (!Array.isArray(entries) || !entries.length) return 0;
+  const data = read();
+  const seen = new Set(data.history.map((h) => h.url));
+  let added = 0;
+  for (const e of entries) {
+    if (!e || !e.url || !/^https?:\/\//i.test(e.url) || seen.has(e.url)) continue;
+    seen.add(e.url);
+    data.history.push({ url: e.url, title: e.title || e.url, time: e.time || Date.now() });
+    added++;
+  }
+  data.history.sort((a, b) => (b.time || 0) - (a.time || 0));
+  if (data.history.length > HISTORY_CAP) data.history.length = HISTORY_CAP;
+  write(data);
+  return added;
+}
 
 // --- Per-site permissions ---
 // permissions: { [origin]: { [permission]: 'allow' | 'block' } }
@@ -121,6 +139,7 @@ module.exports = {
   getHistory,
   addHistory,
   clearHistory,
+  importHistory,
   getPermission,
   setPermission,
   getSitePermissions,

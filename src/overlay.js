@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const KINDS = ['menu', 'profile', 'downloads', 'history', 'siteinfo', 'shield'];
+const KINDS = ['menu', 'profile', 'downloads', 'history', 'siteinfo', 'shield', 'setup', 'enginepick'];
 
 const hsearch = $('hsearch');
 
@@ -12,7 +12,87 @@ window.overlay.onShow((kind) => {
     }
     renderHistory();
   }
+  if (kind === 'menu') renderStats();
+  if (kind === 'profile') renderProfile();
 });
+
+// The profile is just your computer account: friendly name + account picture
+// (or a monogram), read locally with no sign-in.
+function renderProfile() {
+  window.overlay
+    .profile()
+    .then((p) => {
+      const name = (p && p.name) || 'You';
+      const nameEl = $('pf-name');
+      if (nameEl) nameEl.textContent = name;
+      const av = $('pf-avatar');
+      if (!av) return;
+      if (p && p.picture) {
+        av.textContent = '';
+        const im = document.createElement('img');
+        im.className = 'pf-img';
+        im.alt = '';
+        im.src = p.picture;
+        av.appendChild(im);
+      } else {
+        av.textContent = (name.trim()[0] || '?').toUpperCase();
+      }
+    })
+    .catch(() => {});
+}
+
+// Search-engine picker (opened from the omnibox button). Sets the one default.
+window.overlay.onEnginepick(({ current, list }) => {
+  const wrap = $('ep-list');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  for (const e of list || []) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'ep-row' + (e.id === current ? ' active' : '');
+    const img = document.createElement('img');
+    img.className = 'ep-fav';
+    img.alt = '';
+    const firstParty = 'https://' + e.domain.replace(/^www\./, '') + '/favicon.ico';
+    window.overlay
+      .favicon(e.domain)
+      .then((d) => {
+        img.src = d || firstParty;
+      })
+      .catch(() => {
+        img.src = firstParty;
+      });
+    row.appendChild(img);
+    const label = document.createElement('span');
+    label.className = 'ep-label';
+    label.textContent = e.label;
+    row.appendChild(label);
+    if (e.id === current) {
+      const chk = document.createElement('span');
+      chk.className = 'ep-check';
+      chk.innerHTML = '&#10003;';
+      row.appendChild(chk);
+    }
+    row.addEventListener('click', () => window.overlay.setSearchEngine(e.id));
+    wrap.appendChild(row);
+  }
+});
+
+// Memory + tab readout in the menu footer (efficiency you can see).
+function renderStats() {
+  const el = $('menu-stats');
+  if (!el) return;
+  window.overlay
+    .stats()
+    .then((s) => {
+      const tabs = `${s.tabs} tab${s.tabs === 1 ? '' : 's'}`;
+      const asleep = s.asleep ? `, ${s.asleep} asleep` : '';
+      el.textContent = `${s.memMB} MB · ${tabs}${asleep}`;
+    })
+    .catch(() => {
+      el.textContent = '';
+    });
+}
 
 const ACTIONS = {
   newtab: () => window.overlay.newTab(),
@@ -22,6 +102,9 @@ const ACTIONS = {
   'zoom-reset': () => window.overlay.zoom('reset'),
   ai: () => window.overlay.toggleAI(),
   settings: () => window.overlay.openSettingsPage(),
+  // Profile menu: passwords and privacy jump to their settings section.
+  passwords: () => window.overlay.openSettingsPage('passwords'),
+  privacy: () => window.overlay.openSettingsPage('privacy'),
 };
 
 document.querySelectorAll('.pop-item[data-act]').forEach((btn) => {
@@ -34,6 +117,10 @@ document.querySelectorAll('.pop-item[data-act]').forEach((btn) => {
     if (act === 'find') {
       window.overlay.openFind();
       window.overlay.close();
+      return;
+    }
+    if (act === 'import') {
+      window.overlay.openSetup(); // switches this layer to the import picker
       return;
     }
     (ACTIONS[act] || (() => {}))();
@@ -171,3 +258,126 @@ window.overlay.onShield((data) => {
   $('sh-toggle').classList.toggle('on', data.enabled);
 });
 $('sh-toggle').addEventListener('click', () => window.overlay.toggleBlocker());
+
+// --- First-run setup picker (make default + import) ---
+function fmt(n) {
+  return (n || 0).toLocaleString();
+}
+function availableTypes(s) {
+  const t = [];
+  if (s.bookmarks > 0) t.push('bookmarks');
+  if (s.history > 0) t.push('history');
+  if (s.cookies) t.push('cookies');
+  if (s.passwords > 0) t.push('passwords');
+  return t;
+}
+function typeSummary(s) {
+  const parts = [];
+  if (s.bookmarks > 0) parts.push(`${fmt(s.bookmarks)} bookmarks`);
+  if (s.history > 0) parts.push(`${fmt(s.history)} history`);
+  if (s.cookies) parts.push('sessions');
+  if (s.passwords > 0) parts.push(`${fmt(s.passwords)} passwords`);
+  return parts.join(' · ') || 'nothing to import';
+}
+
+let setupSources = [];
+window.overlay.onSetupDefault((isDef) => {
+  $('setup-default-sub').textContent = isDef
+    ? 'Slash handles web links on this device.'
+    : 'Open web links in Slash. Windows will ask you to confirm.';
+  $('setup-default-btn').textContent = isDef ? 'Set again' : 'Set as default';
+});
+window.overlay.onSetupSources((list) => {
+  setupSources = Array.isArray(list) ? list : [];
+  // Fresh state each time the picker opens.
+  importDone = false;
+  const ib = $('setup-import');
+  ib.disabled = false;
+  ib.textContent = 'Import selected';
+  $('setup-status').textContent = '';
+  const wrap = $('setup-sources');
+  wrap.innerHTML = '';
+  const importable = setupSources.filter((s) => availableTypes(s).length);
+  if (!importable.length) {
+    wrap.innerHTML = '<div class="setup-empty">No other browsers found on this computer.</div>';
+    return;
+  }
+  for (const s of importable) {
+    const row = document.createElement('label');
+    row.className = 'setup-src';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.id = s.id;
+    const txt = document.createElement('div');
+    txt.className = 'setup-src-txt';
+    const nm = document.createElement('div');
+    nm.className = 'setup-src-name';
+    nm.textContent = s.name;
+    const sub = document.createElement('div');
+    sub.className = 'setup-src-sub';
+    sub.textContent = typeSummary(s);
+    txt.appendChild(nm);
+    txt.appendChild(sub);
+    row.appendChild(cb);
+    row.appendChild(txt);
+    wrap.appendChild(row);
+  }
+});
+
+$('setup-default-btn').addEventListener('click', async () => {
+  $('setup-default-btn').textContent = 'Opening Default Apps…';
+  try {
+    await window.overlay.setDefault();
+  } catch {
+    /* ignore */
+  }
+});
+
+$('setup-skip').addEventListener('click', () => window.overlay.close());
+
+let importDone = false;
+$('setup-import').addEventListener('click', async () => {
+  const btn = $('setup-import');
+  // After a finished import the primary button reads "Done" and just closes.
+  if (importDone) {
+    window.overlay.close();
+    return;
+  }
+  const checked = [...document.querySelectorAll('#setup-sources input:checked')];
+  const status = $('setup-status');
+  if (!checked.length) {
+    status.textContent = 'Pick at least one browser.';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+  let totalMarks = 0;
+  let totalHist = 0;
+  let totalSessions = 0;
+  let totalPwds = 0;
+  for (const cb of checked) {
+    const s = setupSources.find((x) => x.id === cb.dataset.id);
+    if (!s) continue;
+    const types = availableTypes(s);
+    let r = {};
+    try {
+      r = await window.overlay.migrateRun(s.id, types);
+    } catch {
+      r = {};
+    }
+    totalMarks += r.bookmarks || 0;
+    totalHist += r.history || 0;
+    if (r.cookies) totalSessions += r.cookies.imported || 0;
+    if (r.passwords) totalPwds += r.passwords.imported || 0;
+  }
+  const parts = [];
+  if (totalMarks) parts.push(`${fmt(totalMarks)} bookmarks`);
+  if (totalHist) parts.push(`${fmt(totalHist)} history`);
+  if (totalSessions) parts.push(`${fmt(totalSessions)} sessions`);
+  if (totalPwds) parts.push(`${fmt(totalPwds)} passwords`);
+  status.textContent = parts.length ? `Imported ${parts.join(' · ')}.` : 'Imported. Some items may need the browser closed.';
+  // Re-enable as a working "Done" that closes the picker.
+  importDone = true;
+  btn.disabled = false;
+  btn.textContent = 'Done';
+});

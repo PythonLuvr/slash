@@ -8,18 +8,27 @@ const PROVIDERS = [
 
 const $ = (id) => document.getElementById(id);
 
-// A provider logo (favicon), falling back to the spark glyph if it fails.
+// A provider logo (favicon from the local cache), falling back to the spark.
 function providerLogo(p) {
   const img = document.createElement('img');
   img.className = 'pk-logo';
-  img.src = `https://icons.duckduckgo.com/ip3/${p.domain}.ico`;
   img.alt = '';
-  img.addEventListener('error', () => {
+  const fallback = () => {
     const sp = document.createElement('span');
     sp.className = 'spark';
     sp.textContent = '✦';
     img.replaceWith(sp);
-  });
+  };
+  const firstParty = 'https://' + String(p.domain || '').replace(/^www\./, '') + '/favicon.ico';
+  img.addEventListener('error', fallback, { once: true });
+  window.ai
+    .favicon(p.domain)
+    .then((d) => {
+      img.src = d || firstParty;
+    })
+    .catch(() => {
+      img.src = firstParty;
+    });
   return img;
 }
 const input = $('input');
@@ -46,7 +55,17 @@ function updatePickerLabel() {
   input.placeholder = 'Message ' + providerLabel(selection.provider);
   const p = PROVIDERS.find((x) => x.id === selection.provider) || PROVIDERS[0];
   const logo = $('picker-logo');
-  if (logo) logo.src = `https://icons.duckduckgo.com/ip3/${p.domain}.ico`;
+  if (logo) {
+    const firstParty = 'https://' + String(p.domain || '').replace(/^www\./, '') + '/favicon.ico';
+    window.ai
+      .favicon(p.domain)
+      .then((d) => {
+        logo.src = d || firstParty;
+      })
+      .catch(() => {
+        logo.src = firstParty;
+      });
+  }
 }
 
 async function loadSettings() {

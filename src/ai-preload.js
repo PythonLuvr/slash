@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('ai', {
   onLoad: (cb) => ipcRenderer.on('ai:load', (_e, d) => cb(d)),
   // Open a provider's real web app in a new browser tab.
   openWeb: (url) => ipcRenderer.send('ai:open-web', url),
+  favicon: (host) => ipcRenderer.invoke('favicon:get', host),
 });

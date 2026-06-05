@@ -64,7 +64,7 @@ function renderTabs(list) {
   tabsEl.innerHTML = '';
   for (const t of list) {
     const tab = document.createElement('div');
-    tab.className = 'tab' + (t.active ? ' active' : '');
+    tab.className = 'tab' + (t.active ? ' active' : '') + (t.suspended ? ' suspended' : '');
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', t.active ? 'true' : 'false');
     tab.tabIndex = t.active ? 0 : -1;
@@ -178,9 +178,20 @@ function renderBookmarks(list) {
     const dom = bmDomain(b.url);
     if (dom) {
       const img = document.createElement('img');
-      img.src = 'https://icons.duckduckgo.com/ip3/' + dom + '.ico';
       img.alt = '';
       item.appendChild(img);
+      // Local cache when warm; otherwise the site's own favicon (first-party),
+      // never a third-party aggregator.
+      const firstParty = 'https://' + dom.replace(/^www\./, '') + '/favicon.ico';
+      img.addEventListener('error', () => img.remove(), { once: true });
+      window.slash
+        .favicon(dom)
+        .then((d) => {
+          img.src = d || firstParty;
+        })
+        .catch(() => {
+          img.src = firstParty;
+        });
     }
     const t = document.createElement('span');
     t.textContent = b.title || dom || b.url;
@@ -210,6 +221,51 @@ $('ai').addEventListener('click', () => window.slash.toggleAI());
 $('menu-btn').addEventListener('click', () => window.slash.togglePop('menu'));
 $('profile').addEventListener('click', () => window.slash.togglePop('profile'));
 $('downloads').addEventListener('click', () => window.slash.togglePop('downloads'));
+
+// Omnibox search-engine picker: shows the current default, click to change it.
+let omniEngines = [];
+function setOmniEngine(id) {
+  const e = omniEngines.find((x) => x.id === id) || omniEngines[0];
+  const img = document.querySelector('#omni-engine .oe-fav');
+  if (!e || !img) return;
+  const firstParty = 'https://' + e.domain.replace(/^www\./, '') + '/favicon.ico';
+  window.slash
+    .favicon(e.domain)
+    .then((d) => {
+      img.src = d || firstParty;
+    })
+    .catch(() => {
+      img.src = firstParty;
+    });
+}
+window.slash
+  .searchGet()
+  .then(({ current, list }) => {
+    omniEngines = list || [];
+    setOmniEngine(current);
+  })
+  .catch(() => {});
+window.slash.onSearchEngine((id) => setOmniEngine(id));
+$('omni-engine').addEventListener('click', () => window.slash.togglePop('enginepick'));
+
+// Toolbar avatar reflects the computer account (initial, or account picture).
+window.slash
+  .profile()
+  .then((p) => {
+    const av = document.querySelector('#profile .avatar');
+    if (!av || !p) return;
+    if (p.picture) {
+      av.textContent = '';
+      const im = document.createElement('img');
+      im.className = 'avatar-img';
+      im.alt = '';
+      im.src = p.picture;
+      av.appendChild(im);
+    } else {
+      av.textContent = ((p.name || 'You').trim()[0] || '?').toUpperCase();
+    }
+  })
+  .catch(() => {});
 
 // Generic infobar strip (main controls the chrome height so it pushes content
 // down rather than overlapping it). Used by the first-run default-browser

@@ -138,6 +138,41 @@ releases. Set up when Slash starts shipping packaged builds.
 - CLI variants already run in default permission mode (no bypass, no autonomous
   tools). Do not loosen that.
 
+## Migration and passwords (landed 2026-06-05)
+
+Moving in from another browser, without sending anything off the machine.
+
+### Import from another browser (`lib/migrate.js`)
+- Reads installed Chromium-family browsers (Chrome, Edge, Brave, Vivaldi, Opera),
+  one entry per profile, from the local profile directory. Nothing is uploaded.
+- **Bookmarks / history:** plaintext JSON and the `History` SQLite DB, read with
+  `sql.js` (pure WASM, no native build, so every clone of the repo works). History
+  merges by URL keeping each entry's own visit time (`store.importHistory`).
+- **Cookies (stay signed in):** the `Cookies` SQLite DB. Values are AES-256-GCM
+  encrypted under a key sealed with Windows DPAPI. Same OS user, so we unseal the
+  key (`CryptUnprotectData` via PowerShell, no native dep) and decrypt, then inject
+  with `session.cookies.set`. Honest limits, surfaced in the UI:
+  - Chrome's newer **app-bound** (`v20`) cookies cannot be read by design; they are
+    skipped and counted ("N protected"). Verified live: current Chrome returns 100%
+    app-bound, Brave decrypts cleanly.
+  - A running browser can lock the DB; we fall back to a temp copy, and tell the
+    user to close it if that still fails.
+- Gotcha: nothing here ever leaves the device, and it only runs on an explicit
+  per-source "Import" click with the data types the user ticked.
+
+### Password vault (`lib/vault.js`)
+- Encrypted at rest with the same `safeStorage` (DPAPI/Keychain/libsecret) as the
+  API keys (item 2). Plaintext only in memory while running.
+- Filled by **CSV import** (the ecosystem-standard path every browser and password
+  manager supports, and the only robust one now that app-bound encryption blocks
+  direct password reads), plus capture-on-login.
+- **Autofill** (`tab-preload.js`): a minimal sandboxed, context-isolated preload on
+  page views. It fills saved logins only into visible fields on the matching origin,
+  on a real focus gesture, and **never exposes passwords to page scripts** (nothing
+  on `window`; the vault data stays in the isolated world). Offers to save/update on
+  submit via the non-blocking infobar.
+- Related: item 10 (encrypt the local data store) now has a working pattern to copy.
+
 ## Suggested first sweep
 
 Cheapest high-impact set to land first, mostly main-process and settings, little

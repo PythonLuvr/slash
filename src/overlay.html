@@ -21,18 +21,25 @@
       <div class="pop-sep"></div>
       <button class="pop-item" data-act="ai">AI panel <kbd>Ctrl+J</kbd></button>
       <button class="pop-item" data-act="settings">Settings &amp; appearance</button>
+      <div class="pop-sep"></div>
+      <div id="menu-stats" class="menu-stats">&nbsp;</div>
     </div>
 
     <div id="profile" class="pop hidden">
       <div class="profile-card">
-        <div class="avatar-lg">s</div>
+        <div class="avatar-lg" id="pf-avatar">s</div>
         <div class="profile-meta">
-          <div class="profile-name">slash</div>
+          <div class="profile-name" id="pf-name">slash</div>
           <div class="profile-sub">Local profile, on this device</div>
         </div>
       </div>
       <div class="pop-sep"></div>
-      <button class="pop-item" data-act="settings">Customize appearance</button>
+      <button class="pop-item" data-act="passwords">Passwords</button>
+      <button class="pop-item" data-act="import">Import your stuff</button>
+      <button class="pop-item" data-act="privacy">Privacy &amp; security</button>
+      <button class="pop-item" data-act="settings">Settings &amp; appearance</button>
+      <div class="pop-sep"></div>
+      <div class="profile-note">No account, no sign-in. Everything stays on this device.</div>
     </div>
 
     <div id="downloads" class="pop hidden">
@@ -65,6 +72,39 @@
         <span>Block ads &amp; trackers</span>
         <span class="sw" aria-hidden="true"><span class="knob"></span></span>
       </button>
+    </div>
+
+    <div id="enginepick" class="pop hidden">
+      <div class="pop-head">Search with</div>
+      <div id="ep-list"></div>
+    </div>
+
+    <div id="setup" class="pop hidden">
+      <div class="setup-title">Welcome to <span class="sl">/</span>slash</div>
+
+      <div class="setup-default">
+        <div class="setup-default-text">
+          <div class="setup-row-name">Make Slash your default browser</div>
+          <div class="setup-row-sub" id="setup-default-sub">Open web links in Slash.</div>
+        </div>
+        <button id="setup-default-btn" class="setup-btn" type="button">Set as default</button>
+      </div>
+
+      <div class="pop-sep"></div>
+
+      <div class="setup-row-name">Bring your stuff over</div>
+      <div class="setup-row-sub">Pick the browsers to import from. Everything stays on this device.</div>
+      <div id="setup-sources" class="setup-sources">
+        <div class="setup-empty">Looking for browsers…</div>
+      </div>
+
+      <div class="setup-foot">
+        <div id="setup-status" class="setup-status"></div>
+        <div class="setup-foot-btns">
+          <button id="setup-skip" class="setup-btn ghost" type="button">Close</button>
+          <button id="setup-import" class="setup-btn primary" type="button">Import selected</button>
+        </div>
+      </div>
     </div>
 
     <script src="overlay.js"></script>

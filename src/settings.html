@@ -14,14 +14,14 @@
         <button id="close" type="button">Done</button>
       </header>
 
-      <section>
+      <section id="sec-search">
         <h2>Search</h2>
-        <div class="row">
+        <div class="row col">
           <div class="label">
-            <div class="name">Default search engine</div>
-            <div class="desc">Used for the address bar and the start page.</div>
+            <div class="name">Search engines</div>
+            <div class="desc">Every available engine. Set your default (used in the address bar) and star the ones that appear as quick picks on the start page.</div>
           </div>
-          <div id="engines" class="chips"></div>
+          <div id="engines" class="engine-list"></div>
         </div>
       </section>
 
@@ -37,17 +37,33 @@
       </section>
 
       <section>
-        <h2>Import</h2>
-        <div class="row">
+        <h2>Move your stuff to Slash</h2>
+        <div class="row col">
           <div class="label">
-            <div class="name">Bring your bookmarks over</div>
-            <div class="desc">Import bookmarks from another browser installed on this computer.</div>
+            <div class="name">Import from another browser</div>
+            <div class="desc">
+              Bring your bookmarks, history, and signed-in sessions over from a browser on this computer.
+              Everything is read locally and stays on your machine. Cookies from very recent Chrome may be
+              protected by app-bound encryption and can't be moved.
+            </div>
           </div>
-          <div id="import-list" class="import-list"></div>
+          <div id="migrate-list" class="migrate-list"></div>
         </div>
       </section>
 
-      <section>
+      <section id="sec-passwords">
+        <h2>Passwords</h2>
+        <div class="row">
+          <div class="label">
+            <div class="name">Saved logins</div>
+            <div class="desc" id="vault-desc">Stored encrypted on this device and filled only on the site they belong to.</div>
+          </div>
+          <button id="import-csv" class="btn" type="button">Import from CSV</button>
+        </div>
+        <div id="vault-list" class="vault-list"></div>
+      </section>
+
+      <section id="sec-privacy">
         <h2>Privacy &amp; security</h2>
         <div class="row toggle-row" data-key="blockAds">
           <div class="label">

@@ -77,6 +77,12 @@
   color: var(--ink);
 }
 
+/* Suspended (discarded) background tab: dimmed until you click back to it. */
+.tab.suspended:not(.active) .title,
+.tab.suspended:not(.active) .favicon {
+  opacity: 0.5;
+}
+
 .tab .favicon {
   width: 15px;
   height: 15px;
@@ -265,6 +271,39 @@
   padding: 0;
 }
 
+/* Omnibox search-engine picker button (left of the address field). */
+.omni-engine {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 5px;
+  margin-right: 2px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background 0.12s ease;
+}
+
+.omni-engine:hover {
+  background: var(--raised-2);
+}
+
+.omni-engine .oe-fav {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.omni-engine .oe-caret {
+  font-size: 8px;
+  color: var(--muted);
+  line-height: 1;
+}
+
 #profile .avatar {
   width: 28px;
   height: 28px;
@@ -276,6 +315,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+  text-transform: uppercase;
+}
+
+#profile .avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
 #star.on {

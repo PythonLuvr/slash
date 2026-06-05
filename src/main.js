@@ -1,15 +1,34 @@
-const { app, BaseWindow, WebContentsView, ipcMain, Menu, session, shell, clipboard } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain, Menu, session, shell, clipboard, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { spawnSync } = require('child_process');
 const { readSettings, writeSettings } = require('./lib/settings');
 const { STREAMERS, runAnthropicAgent } = require('./lib/api');
 const { startMcpServer } = require('./lib/mcp-server');
 const { autoUpdater } = require('electron-updater');
 const store = require('./lib/store');
+const migrate = require('./lib/migrate');
+const vault = require('./lib/vault');
+const favicons = require('./lib/favicons');
 
 app.setName('Slash');
 // Windows taskbar / notification identity (so it groups as Slash, not Electron).
 if (process.platform === 'win32') app.setAppUserModelId('com.pythonluvr.slash');
+
+// Make "doesn't phone home" true, not just intended. These switches turn off
+// Chromium's background network chatter (component/variations updates, domain
+// reliability, push messaging, crash upload) so the engine talks only to the
+// sites you visit, your search engine, your DoH resolver, and your AI provider.
+app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-domain-reliability');
+app.commandLine.appendSwitch('disable-breakpad'); // no crash-dump upload
+app.commandLine.appendSwitch(
+  'disable-features',
+  'OptimizationHints,OptimizationGuideModelDownloading,MediaRouter,Translate,InterestCohort,AutofillServerCommunication',
+);
+
 
 // Single instance: when Slash is the default browser and a link is opened, the
 // OS launches us again with the URL in argv. Reuse the running window instead
@@ -83,18 +102,27 @@ const upgraded = new Map(); // upgraded https url -> original http url
 // Popover sizes (the view is sized to the card).
 const POP_SIZES = {
   menu: { w: 252, h: 436 },
-  profile: { w: 250, h: 132 },
+  profile: { w: 262, h: 300 },
   downloads: { w: 270, h: 230 },
   history: { w: 380, h: 460 },
   siteinfo: { w: 330, h: 264 },
   shield: { w: 268, h: 150 },
+  setup: { w: 344, h: 440 },
+  enginepick: { w: 212, h: 162 },
 };
 
-// Top-right cluster popovers anchor right; site-info anchors under the omnibox.
+// Top-right cluster popovers anchor right; site-info anchors under the omnibox;
+// the first-run setup picker centers under the toolbar.
 function popoverPos(kind, s, width) {
+  if (kind === 'setup') return { x: Math.max(10, Math.round((width - s.w) / 2)), y: CHROME_HEIGHT };
+  // The engine picker drops under its button at the left of the omnibox.
+  if (kind === 'enginepick') return { x: OMNIBOX_LEFT, y: CHROME_HEIGHT };
   const x = kind === 'siteinfo' ? 12 : Math.max(0, width - s.w - 10);
   return { x, y: CHROME_HEIGHT };
 }
+// Approximate x of the omnibox's left edge (after home/back/forward/reload),
+// where the search-engine button sits. Tunable if the toolbar spacing changes.
+const OMNIBOX_LEFT = 150;
 
 // Tab model. Each tab owns a WebContentsView (untrusted web content). A tab
 // with `onHero: true` shows the shared heroView instead of its own page.
@@ -109,9 +137,25 @@ function activeTab() {
 
 const ENGINES = {
   duckduckgo: (q) => 'https://duckduckgo.com/?q=' + encodeURIComponent(q),
+  startpage: (q) => 'https://www.startpage.com/sp/search?query=' + encodeURIComponent(q),
+  brave: (q) => 'https://search.brave.com/search?q=' + encodeURIComponent(q),
   google: (q) => 'https://www.google.com/search?q=' + encodeURIComponent(q),
+  bing: (q) => 'https://www.bing.com/search?q=' + encodeURIComponent(q),
+  ecosia: (q) => 'https://www.ecosia.org/search?q=' + encodeURIComponent(q),
   wikipedia: (q) => 'https://en.wikipedia.org/w/index.php?search=' + encodeURIComponent(q),
 };
+// Shared engine list (id/label/domain) so the omnibox picker, the start page,
+// and settings all show the same set and the same one default. Privacy-leaning
+// engines are listed first.
+const ENGINE_META = [
+  { id: 'duckduckgo', label: 'DuckDuckGo', domain: 'duckduckgo.com' },
+  { id: 'startpage', label: 'Startpage', domain: 'startpage.com' },
+  { id: 'brave', label: 'Brave Search', domain: 'brave.com' },
+  { id: 'google', label: 'Google', domain: 'google.com' },
+  { id: 'bing', label: 'Bing', domain: 'bing.com' },
+  { id: 'ecosia', label: 'Ecosia', domain: 'ecosia.org' },
+  { id: 'wikipedia', label: 'Wikipedia', domain: 'wikipedia.org' },
+];
 
 // The user's chosen default search engine (private DuckDuckGo by default).
 function searchURL(q) {
@@ -456,6 +500,7 @@ function sendTabs() {
       favicon: t.onHero ? null : t.favicon,
       active: t.id === activeTabId,
       loading: t.loading,
+      suspended: !!t.suspended,
     })),
   );
 }
@@ -472,7 +517,7 @@ function layout() {
   if (interstitialView) interstitialView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   if (settingsView) settingsView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   if (aiPageView) aiPageView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  for (const t of tabs) t.view.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  for (const t of tabs) if (t.view) t.view.setBounds({ x: 0, y: top, width: mainW, height: ch });
   aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
   if (popKind && popoverView) {
     const s = POP_SIZES[popKind];
@@ -509,7 +554,7 @@ function updateContentVisibility() {
   if (aiPageView) aiPageView.setVisible(onAIPage);
   const onContent = settingsOpen || onInt || onAIPage;
   heroView.setVisible(!onContent && !!at && at.onHero);
-  for (const t of tabs) t.view.setVisible(!onContent && !!at && t.id === at.id && !at.onHero);
+  for (const t of tabs) if (t.view) t.view.setVisible(!onContent && !!at && t.id === at.id && !at.onHero);
 }
 
 function goAIPage(opts = {}) {
@@ -526,9 +571,9 @@ function goAIPage(opts = {}) {
   aiPageView.webContents.focus();
 }
 
-function openSettingsPage() {
+function openSettingsPage(section) {
   settingsOpen = true;
-  if (settingsView) settingsView.webContents.send('settings:show');
+  if (settingsView) settingsView.webContents.send('settings:show', typeof section === 'string' ? section : null);
   updateContentVisibility();
   if (settingsView) settingsView.webContents.focus();
 }
@@ -740,8 +785,27 @@ function showPopover(kind) {
   if (kind === 'history') popoverView.webContents.send('history', store.getHistory().slice(0, 300));
   if (kind === 'siteinfo') sendSiteinfo();
   if (kind === 'shield') sendShield();
+  if (kind === 'setup') sendSetup();
+  if (kind === 'enginepick') {
+    popoverView.webContents.send('enginepick', { current: readSettings().searchEngine, list: ENGINE_META });
+  }
   popoverView.webContents.focus();
   popKind = kind;
+}
+
+// One default search engine, reflected in the omnibox button and the start page.
+function broadcastSearchEngine() {
+  const cur = readSettings().searchEngine;
+  if (chromeView) chromeView.webContents.send('search-engine', cur);
+  if (heroView) heroView.webContents.send('search-engine', cur);
+}
+
+// First-run setup picker: current default-browser status + importable sources.
+function sendSetup() {
+  popoverView.webContents.send('setup:default', app.isDefaultProtocolClient('http'));
+  migrateSourceList()
+    .then((list) => popoverView.webContents.send('setup:sources', list))
+    .catch(() => popoverView.webContents.send('setup:sources', []));
 }
 
 function sendShield() {
@@ -762,23 +826,16 @@ function togglePopover(kind) {
 }
 
 // --- Tabs ---
-function createTab(opts = {}) {
-  const id = ++tabSeq;
-  const view = new WebContentsView({ webPreferences: { ...SECURE_PREFS } });
-  const tab = {
-    id,
-    view,
-    title: 'New tab',
-    url: '',
-    favicon: null,
-    onHero: true,
-    canGoBack: false,
-    canGoForward: false,
-    loading: false,
-    failedHttp: null, // set when an https upgrade fails (HTTPS-only)
-    blocked: 0, // ads/trackers blocked on the current page
-    onAIPage: false, // showing the full-screen slash://ai page
-  };
+// Build (or rebuild) a tab's WebContentsView and wire all its handlers. Split
+// out of createTab so a suspended tab can be re-created on demand. Tab content
+// stays untrusted (sandboxed, isolated); the only addition is a minimal
+// autofill preload that fills saved logins and never exposes them.
+function attachTabView(tab) {
+  const id = tab.id;
+  const view = new WebContentsView({
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'tab-preload.js') },
+  });
+  tab.view = view;
   const wc = view.webContents;
 
   const refresh = () => {
@@ -803,6 +860,9 @@ function createTab(opts = {}) {
   }
   wc.on('page-favicon-updated', (_e, favs) => {
     tab.favicon = (favs && favs[0]) || null;
+    // Cache the real favicon locally so the start page / bookmarks can show it
+    // without calling a third-party favicon service.
+    if (tab.favicon) favicons.rememberFromPage(wc.getURL(), tab.favicon);
     sendTabs();
   });
   // History: record on real navigations, update the title when it resolves.
@@ -865,12 +925,33 @@ function createTab(opts = {}) {
   win.contentView.addChildView(view);
   view.setVisible(false);
   raiseChrome();
+  return view;
+}
 
+function createTab(opts = {}) {
+  const id = ++tabSeq;
+  const tab = {
+    id,
+    view: null,
+    title: 'New tab',
+    url: '',
+    favicon: null,
+    onHero: true,
+    canGoBack: false,
+    canGoForward: false,
+    loading: false,
+    failedHttp: null, // set when an https upgrade fails (HTTPS-only)
+    blocked: 0, // ads/trackers blocked on the current page
+    onAIPage: false, // showing the full-screen slash://ai page
+    lastActive: Date.now(), // for idle-based suspension
+    suspended: false, // renderer freed; url/title/favicon kept
+  };
+  attachTabView(tab);
   tabs.push(tab);
 
   if (opts.url) {
     tab.onHero = false;
-    wc.loadURL(normalizeInput(opts.url) || opts.url);
+    tab.view.webContents.loadURL(normalizeInput(opts.url) || opts.url);
   }
   if (opts.activate !== false) activateTab(id);
   else sendTabs();
@@ -879,7 +960,13 @@ function createTab(opts = {}) {
 }
 
 function activateTab(id) {
-  if (!tabs.find((t) => t.id === id)) return;
+  const tab = tabs.find((t) => t.id === id);
+  if (!tab) return;
+  // Mark the tab we are leaving as idle-from-now.
+  const prev = tabs.find((t) => t.id === activeTabId);
+  if (prev && prev.id !== id) prev.lastActive = Date.now();
+  if (tab.suspended) wakeTab(tab); // bring a discarded tab back before showing it
+  tab.lastActive = Date.now();
   activeTabId = id;
   settingsOpen = false;
   updateContentVisibility();
@@ -888,16 +975,58 @@ function activateTab(id) {
   sendBlocked();
 }
 
-function closeTab(id) {
-  const idx = tabs.findIndex((t) => t.id === id);
-  if (idx < 0) return;
-  const tab = tabs[idx];
-  if (tab.url) closedStack.push(tab.url);
+// --- Tab suspension (discarding) ---
+// Free a background tab's renderer once it has been idle, keeping its
+// url/title/favicon so it reopens instantly when clicked. This is the real
+// memory win: a Chromium renderer is tens to hundreds of MB.
+const SUSPEND_MS = 15 * 60 * 1000;
+
+function suspendTab(tab) {
+  if (!tab || tab.suspended || !tab.view || tab.id === activeTabId || tab.onHero) return;
+  tab.url = tab.view.webContents.getURL() || tab.url; // remember where it was
   win.contentView.removeChildView(tab.view);
   try {
     tab.view.webContents.close();
   } catch {
     /* already gone */
+  }
+  tab.view = null;
+  tab.suspended = true;
+  tab.loading = false;
+  sendTabs();
+}
+
+function wakeTab(tab) {
+  if (!tab || !tab.suspended) return;
+  attachTabView(tab);
+  tab.suspended = false;
+  if (tab.url) {
+    tab.onHero = false;
+    tab.view.webContents.loadURL(tab.url);
+  }
+  layout();
+}
+
+function maybeSuspendIdleTabs() {
+  const now = Date.now();
+  for (const t of tabs) {
+    if (t.id === activeTabId || t.suspended || !t.view || t.onHero) continue;
+    if (now - (t.lastActive || 0) > SUSPEND_MS) suspendTab(t);
+  }
+}
+
+function closeTab(id) {
+  const idx = tabs.findIndex((t) => t.id === id);
+  if (idx < 0) return;
+  const tab = tabs[idx];
+  if (tab.url) closedStack.push(tab.url);
+  if (tab.view) {
+    win.contentView.removeChildView(tab.view);
+    try {
+      tab.view.webContents.close();
+    } catch {
+      /* already gone */
+    }
   }
   tabs.splice(idx, 1);
 
@@ -1038,7 +1167,11 @@ function createWindow() {
   win.contentView.addChildView(popoverView);
   popoverView.webContents.loadFile(path.join(__dirname, 'overlay.html'));
   popoverView.setVisible(false);
-  popoverView.webContents.on('blur', hidePopover); // close on click-away
+  // Close on click-away, except the first-run setup picker: opening Windows
+  // Default Apps steals focus, and we don't want that to abort the import step.
+  popoverView.webContents.on('blur', () => {
+    if (popKind !== 'setup') hidePopover();
+  });
 
   findView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'find-preload.js') },
@@ -1387,6 +1520,8 @@ app.whenReady().then(() => {
   setupDownloads();
   createWindow();
   setupBlocker();
+  favicons.seedBrands(); // pre-cache the fixed brand icons locally (no 3rd party)
+  setInterval(maybeSuspendIdleTabs, 60 * 1000); // free idle background tabs' RAM
 
   // Local MCP server exposing the browser tools, so the free CLIs can drive
   // the browser. The config (with a per-session token + the chosen port) is
@@ -1471,7 +1606,7 @@ ipcMain.on('open-settings', () => {
   toggleAI(true);
   aiView.webContents.send('open-settings');
 });
-ipcMain.on('settings:open', openSettingsPage);
+ipcMain.on('settings:open', (_e, section) => openSettingsPage(section));
 ipcMain.on('settings:close', closeSettingsPage);
 ipcMain.on('settings:open-ai', () => {
   closeSettingsPage();
@@ -1488,6 +1623,29 @@ ipcMain.on('download:show', (_e, id) => {
 });
 ipcMain.on('pop:toggle', (_e, kind) => togglePopover(kind));
 ipcMain.on('pop:close', hidePopover);
+ipcMain.on('pop:setup', () => showPopover('setup')); // open the import picker from the profile menu
+
+// --- IPC: default search engine (omnibox picker + start page share one value) ---
+// list = the full engine set (omnibox dropdown). favorites = the ordered subset
+// shown as quick-pick chips on the start page (user-customizable).
+ipcMain.handle('search:get', () => {
+  const fav = (readSettings().heroEngines || []).filter((id) => ENGINES[id]);
+  return { current: readSettings().searchEngine, list: ENGINE_META, favorites: fav };
+});
+ipcMain.on('search:set', (_e, id) => {
+  if (!ENGINES[id]) return;
+  writeSettings({ searchEngine: id });
+  broadcastSearchEngine();
+  hidePopover();
+});
+// The start page (or settings) saves the quick-pick chips (add/remove/reorder).
+ipcMain.on('hero:engines-set', (_e, ids) => {
+  if (!Array.isArray(ids)) return;
+  writeSettings({ heroEngines: ids.filter((id) => ENGINES[id]) });
+  if (heroView) {
+    heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((id) => ENGINES[id]));
+  }
+});
 
 // --- IPC: bookmarks ---
 ipcMain.on('bookmark:toggle', () => {
@@ -1641,17 +1799,15 @@ function hideInfobar() {
 function maybeShowFirstRun() {
   const s = readSettings();
   if (s.seenDefaultPrompt || infobarOpen) return;
-  if (app.isDefaultProtocolClient('http')) {
-    writeSettings({ seenDefaultPrompt: true });
-    return;
-  }
+  // Shown once per fresh profile. We no longer skip it when already the default
+  // browser: the welcome also offers to import your data, which is useful
+  // regardless. The picker itself reflects current default status.
   showInfobar({
     id: 'firstrun',
-    text: 'Make Slash your default browser?',
+    text: 'Welcome to Slash. Make it your default browser and bring your stuff over?',
     actions: [
-      { key: 'set', label: 'Set as default', primary: true },
-      { key: 'later', label: 'Not now' },
-      { key: 'close', label: 'Dismiss', close: true },
+      { key: 'setup', label: 'Set up', primary: true },
+      { key: 'close', label: 'Not now', close: true },
     ],
   });
 }
@@ -1687,13 +1843,9 @@ function setupUpdater() {
 
 ipcMain.on('infobar:action', (_e, { id, key }) => {
   if (id === 'firstrun') {
-    if (key === 'set') {
-      app.setAsDefaultProtocolClient('http');
-      app.setAsDefaultProtocolClient('https');
-      if (process.platform === 'win32') shell.openExternal('ms-settings:defaultapps').catch(() => {});
-    }
-    writeSettings({ seenDefaultPrompt: true });
+    writeSettings({ seenDefaultPrompt: true }); // engaged or dismissed: don't nag again
     hideInfobar();
+    if (key === 'setup') showPopover('setup'); // open the default + import picker
   } else if (id === 'update') {
     if (key === 'update') {
       // Download in the background; update-downloaded then restarts in place.
@@ -1718,6 +1870,13 @@ ipcMain.on('infobar:action', (_e, { id, key }) => {
     }
   } else if (id === 'updating') {
     hideInfobar();
+  } else if (id === 'savepw') {
+    if (key === 'save' && pendingSave) {
+      vault.upsert(pendingSave);
+    }
+    // 'never' could persist a per-origin block later; for now just dismiss.
+    pendingSave = null;
+    hideInfobar();
   }
 });
 
@@ -1731,66 +1890,216 @@ ipcMain.handle('default:set', () => {
   return app.isDefaultProtocolClient('http');
 });
 
-// --- IPC: import bookmarks from another browser (Chromium family) ---
-function importSources() {
-  const LA = process.env.LOCALAPPDATA || '';
-  const AD = process.env.APPDATA || '';
-  const sources = [
-    { id: 'chrome', name: 'Google Chrome', path: path.join(LA, 'Google/Chrome/User Data/Default/Bookmarks') },
-    { id: 'edge', name: 'Microsoft Edge', path: path.join(LA, 'Microsoft/Edge/User Data/Default/Bookmarks') },
-    { id: 'brave', name: 'Brave', path: path.join(LA, 'BraveSoftware/Brave-Browser/User Data/Default/Bookmarks') },
-    { id: 'vivaldi', name: 'Vivaldi', path: path.join(LA, 'Vivaldi/User Data/Default/Bookmarks') },
-    { id: 'opera', name: 'Opera', path: path.join(AD, 'Opera Software/Opera Stable/Bookmarks') },
-  ];
-  return sources.filter((s) => {
-    try {
-      return s.path && fs.existsSync(s.path);
-    } catch {
-      return false;
-    }
-  });
-}
-function readChromiumBookmarks(file) {
-  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+// --- IPC: migrate data from another browser on this machine ---
+// One entry per (browser, profile), with cheap counts so the user can pick
+// what to bring over. Bookmarks/history are plaintext reads; cookies are
+// decrypted with the OS key only when the user asks for them.
+async function migrateSourceList() {
   const out = [];
-  const walk = (node) => {
-    if (!node) return;
-    if (node.type === 'url' && node.url && /^https?:/i.test(node.url)) {
-      out.push({ url: node.url, title: node.name || node.url });
-    }
-    if (Array.isArray(node.children)) node.children.forEach(walk);
-  };
-  const roots = data.roots || {};
-  for (const k of Object.keys(roots)) walk(roots[k]);
-  return out;
-}
-ipcMain.handle('import:list', () =>
-  importSources().map((s) => {
-    let count = 0;
+  for (const s of migrate.discoverSources()) {
+    let info = { bookmarks: 0, history: 0, cookies: false };
     try {
-      count = readChromiumBookmarks(s.path).length;
+      info = await migrate.describe(s);
     } catch {
       /* unreadable */
     }
-    return { id: s.id, name: s.name, count };
-  }),
-);
-ipcMain.handle('import:run', (_e, id) => {
-  const s = importSources().find((x) => x.id === id);
-  if (!s) return { imported: 0 };
-  let imported = 0;
-  try {
-    for (const b of readChromiumBookmarks(s.path)) {
-      if (!store.isBookmarked(b.url)) {
-        store.addBookmark(b);
-        imported++;
+    out.push({ id: s.id, name: s.name, ...info });
+  }
+  return out;
+}
+ipcMain.handle('migrate:sources', () => migrateSourceList());
+
+ipcMain.handle('migrate:run', async (_e, { id, types }) => {
+  const s = migrate.sourceById(id);
+  if (!s) return { error: 'source not found' };
+  const want = new Set(Array.isArray(types) ? types : []);
+  const result = {};
+  if (want.has('bookmarks')) {
+    let added = 0;
+    try {
+      for (const b of migrate.readBookmarks(s)) {
+        if (!store.isBookmarked(b.url)) {
+          store.addBookmark(b);
+          added++;
+        }
       }
+    } catch (e) {
+      result.bookmarksError = String(e.message || e);
     }
+    result.bookmarks = added;
+    sendBookmarks();
+  }
+  if (want.has('history')) {
+    try {
+      result.history = store.importHistory(await migrate.readHistory(s));
+    } catch (e) {
+      result.historyError = String(e.message || e);
+    }
+  }
+  if (want.has('cookies')) {
+    try {
+      const { cookies, appBound, failed } = await migrate.readCookies(s);
+      let imported = 0;
+      for (const c of cookies) {
+        try {
+          await session.defaultSession.cookies.set(c);
+          imported++;
+        } catch {
+          /* a single bad cookie should not stop the rest */
+        }
+      }
+      result.cookies = { imported, appBound, failed };
+    } catch (e) {
+      result.cookiesError = String(e.message || e);
+    }
+  }
+  if (want.has('passwords')) {
+    try {
+      const { logins, appBound, failed } = await migrate.readPasswords(s);
+      let imported = 0;
+      for (const l of logins) {
+        if (vault.upsert(l).changed) imported++;
+      }
+      result.passwords = { imported, appBound, failed };
+    } catch (e) {
+      result.passwordsError = String(e.message || e);
+    }
+  }
+  return result;
+});
+
+// --- IPC: password vault ---
+ipcMain.handle('vault:list', () => vault.list());
+ipcMain.handle('vault:count', () => vault.count());
+ipcMain.handle('vault:remove', (_e, { host, username }) => vault.remove(host, username));
+ipcMain.handle('vault:importCsv', async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Import passwords from CSV',
+    properties: ['openFile'],
+    filters: [{ name: 'CSV', extensions: ['csv'] }],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };
+  try {
+    const text = fs.readFileSync(r.filePaths[0], 'utf8');
+    return vault.importCsv(text);
+  } catch (e) {
+    return { error: String(e.message || e) };
+  }
+});
+
+// --- IPC: autofill (used by the per-tab preload) ---
+ipcMain.handle('autofill:get', (_e, origin) => {
+  try {
+    return vault.forOrigin(origin);
+  } catch {
+    return [];
+  }
+});
+let pendingSave = null;
+ipcMain.on('autofill:capture', (_e, { origin, username, password }) => {
+  if (!password) return;
+  // Already saved with the same password? Nothing to offer.
+  const existing = vault.forOrigin(origin).find((l) => l.username === (username || ''));
+  if (existing && existing.password === password) return;
+  let host = origin;
+  try {
+    host = new URL(origin).hostname.replace(/^www\./, '');
+  } catch {
+    /* keep origin */
+  }
+  pendingSave = { origin, username, password };
+  showInfobar({
+    id: 'savepw',
+    text: existing ? `Update the saved password for ${host}?` : `Save password for ${host}?`,
+    actions: [
+      { key: 'save', label: existing ? 'Update' : 'Save', primary: true },
+      { key: 'never', label: 'Never' },
+      { key: 'close', label: 'Not now', close: true },
+    ],
+  });
+});
+
+// --- IPC: profile (the local OS account, no sign-in, nothing leaves the box) ---
+// The "profile" is just your computer account: short username, friendly display
+// name, and the Windows account picture if you have one. Read locally, cached.
+let cachedProfile = null;
+function getProfile() {
+  if (cachedProfile) return cachedProfile;
+  let username = '';
+  try {
+    username = os.userInfo().username;
   } catch {
     /* ignore */
   }
-  sendBookmarks();
-  return { imported };
+  if (!username) username = process.env.USERNAME || process.env.USER || 'You';
+  let name = username;
+  let picture = '';
+  if (process.platform === 'win32') {
+    try {
+      const ps =
+        "$u=$env:USERNAME;" +
+        "$fn=(Get-CimInstance Win32_UserAccount -Filter \"Name='$u'\" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName);" +
+        '$sid=([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value);' +
+        '$img=(Get-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AccountPicture\\Users\\$sid" -ErrorAction SilentlyContinue).Image448;' +
+        'Write-Output $fn; Write-Output "----"; Write-Output $img';
+      const r = spawnSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+        { encoding: 'utf8', windowsHide: true, timeout: 6000 },
+      );
+      const lines = (r.stdout || '').split(/\r?\n/);
+      const sep = lines.indexOf('----');
+      const fn = (sep > 0 ? lines.slice(0, sep).join(' ') : lines[0] || '').trim();
+      const imgPath = (sep >= 0 ? lines.slice(sep + 1).join('') : '').trim();
+      if (fn) name = fn;
+      if (imgPath && fs.existsSync(imgPath)) {
+        const buf = fs.readFileSync(imgPath);
+        const ext = path.extname(imgPath).toLowerCase();
+        const mime = ext === '.png' ? 'image/png' : ext === '.bmp' ? 'image/bmp' : 'image/jpeg';
+        picture = `data:${mime};base64,` + buf.toString('base64');
+      }
+    } catch {
+      /* fall back to the bare username */
+    }
+  }
+  cachedProfile = { name, username, picture };
+  return cachedProfile;
+}
+ipcMain.handle('profile:get', () => {
+  try {
+    return getProfile();
+  } catch {
+    return { name: 'You', username: '', picture: '' };
+  }
+});
+
+// --- IPC: favicons (served from the local cache, never a 3rd-party service) ---
+// Returns a data URL or '' so the renderer can fall back to a monogram.
+ipcMain.handle('favicon:get', (_e, host) => {
+  try {
+    const d = favicons.get(host);
+    if (!d) {
+      // Not cached yet: try to fetch it first-party in the background for next
+      // time, then the renderer shows its monogram fallback for now.
+      const h = String(host || '').replace(/^www\./, '');
+      if (h) favicons.remember('https://' + h + '/favicon.ico', h);
+    }
+    return d;
+  } catch {
+    return '';
+  }
+});
+
+// --- IPC: app stats (memory + tab counts) for the menu readout ---
+ipcMain.handle('app:stats', () => {
+  let kb = 0;
+  try {
+    for (const m of app.getAppMetrics()) kb += (m.memory && m.memory.workingSetSize) || 0;
+  } catch {
+    /* ignore */
+  }
+  const asleep = tabs.filter((t) => t.suspended).length;
+  return { memMB: Math.round(kb / 1024), tabs: tabs.length, asleep };
 });
 
 // --- IPC: settings ---
@@ -1801,6 +2110,7 @@ ipcMain.handle('settings:set', (_e, patch) => {
   if (typeof patch.doh === 'boolean') applyDoh();
   if (typeof patch.httpsOnly === 'boolean') httpsOnly = next.httpsOnly;
   if (typeof patch.blockAds === 'boolean') setBlocking(next.blockAds);
+  if (patch.searchEngine) broadcastSearchEngine(); // keep omnibox + start page in sync
   return next;
 });
 

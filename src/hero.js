@@ -1,10 +1,18 @@
 // Search engines. DuckDuckGo is the private default. AI is NOT here, it lives
 // on the search bar as its own mode.
-const SOURCES = [
+// Full engine set, filled from search:get (kept in sync with the omnibox picker
+// and settings). `favorites` is the ordered subset shown as quick-pick chips.
+let SOURCES = [
   { id: 'duckduckgo', label: 'DuckDuckGo', domain: 'duckduckgo.com' },
+  { id: 'startpage', label: 'Startpage', domain: 'startpage.com' },
+  { id: 'brave', label: 'Brave Search', domain: 'brave.com' },
   { id: 'google', label: 'Google', domain: 'google.com' },
+  { id: 'bing', label: 'Bing', domain: 'bing.com' },
+  { id: 'ecosia', label: 'Ecosia', domain: 'ecosia.org' },
   { id: 'wikipedia', label: 'Wikipedia', domain: 'wikipedia.org' },
 ];
+let favorites = ['duckduckgo', 'startpage', 'brave']; // start-page quick picks
+let dragId = null;
 
 // AI model pills. Filled from the configured providers (providers:get) so
 // the set expands/changes with the user's setup; falls back to these.
@@ -15,6 +23,25 @@ let HERO_MODELS = [
 ];
 
 const $ = (id) => document.getElementById(id);
+
+// Favicons come from Slash's local cache when available; on a cold cache we
+// load the site's OWN favicon (first-party), never a third-party aggregator
+// that would see every domain at once. onMissing() draws the monogram.
+function firstPartyIcon(host) {
+  return 'https://' + String(host || '').replace(/^www\./, '') + '/favicon.ico';
+}
+function applyFavicon(img, host, onMissing) {
+  img.addEventListener('error', onMissing, { once: true });
+  window.hero
+    .favicon(host)
+    .then((d) => {
+      img.src = d || firstPartyIcon(host);
+    })
+    .catch(() => {
+      img.src = firstPartyIcon(host);
+    });
+}
+
 const input = $('input');
 const enginesEl = $('engines');
 const modelsEl = $('models');
@@ -26,31 +53,194 @@ let source = SOURCES[0]; // DuckDuckGo
 let aiModel = 'claude';
 let mode = 'search';
 
-// --- Engine selector (one-click row) ---
+// --- Engine selector: customizable quick-pick chips ---
+function metaOf(id) {
+  return SOURCES.find((s) => s.id === id);
+}
+function persistFavorites() {
+  window.hero.setHeroEngines(favorites);
+}
+
 function renderEngines() {
   enginesEl.innerHTML = '';
-  for (const s of SOURCES) {
+  for (const id of favorites) {
+    const s = metaOf(id);
+    if (!s) continue;
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'echip' + (s.id === source.id ? ' active' : '');
     chip.setAttribute('role', 'tab');
     chip.setAttribute('aria-selected', s.id === source.id ? 'true' : 'false');
+    chip.title = s.label + '  (right-click to remove, drag to reorder)';
+    chip.draggable = true;
+
     const img = document.createElement('img');
-    img.src = `https://icons.duckduckgo.com/ip3/${s.domain}.ico`;
     img.alt = '';
     img.className = 'efav';
     chip.appendChild(img);
+    applyFavicon(img, s.domain, () => {
+      const sp = document.createElement('span');
+      sp.className = 'spark';
+      sp.textContent = (s.label || '?').charAt(0);
+      img.replaceWith(sp);
+    });
     const label = document.createElement('span');
     label.textContent = s.label;
     chip.appendChild(label);
+
     chip.addEventListener('click', () => {
       source = s;
+      window.hero.setSearchEngine(s.id); // persist as the one default everywhere
       input.placeholder = 'Search ' + s.label + ' or enter an address';
       renderEngines();
       input.focus();
     });
+    // Right-click opens a small menu (set default / remove / delete) instead of
+    // deleting immediately.
+    chip.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openChipMenu(s, e.clientX, e.clientY);
+    });
+    // Drag to reorder.
+    chip.addEventListener('dragstart', () => {
+      dragId = id;
+      chip.classList.add('dragging');
+    });
+    chip.addEventListener('dragend', () => {
+      dragId = null;
+      chip.classList.remove('dragging');
+    });
+    chip.addEventListener('dragover', (e) => e.preventDefault());
+    chip.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (!dragId || dragId === id) return;
+      const from = favorites.indexOf(dragId);
+      const to = favorites.indexOf(id);
+      if (from < 0 || to < 0) return;
+      favorites.splice(from, 1);
+      favorites.splice(to, 0, dragId);
+      persistFavorites();
+      renderEngines();
+    });
     enginesEl.appendChild(chip);
   }
+
+  // "+" chip: add an engine that is not already a quick pick.
+  const remaining = SOURCES.filter((s) => !favorites.includes(s.id));
+  if (remaining.length) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'echip echip-add';
+    add.title = 'Add a search engine';
+    add.setAttribute('aria-label', 'Add a search engine');
+    add.textContent = '+';
+    add.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openEngineAdd(add, remaining);
+    });
+    enginesEl.appendChild(add);
+  }
+}
+
+// Small popup listing engines that can be added to the quick picks.
+function openEngineAdd(anchor, remaining) {
+  closeEngineAdd();
+  const menu = document.createElement('div');
+  menu.id = 'engine-add';
+  menu.className = 'engine-add';
+  for (const s of remaining) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'ea-row';
+    const img = document.createElement('img');
+    img.alt = '';
+    img.className = 'ea-fav';
+    row.appendChild(img);
+    applyFavicon(img, s.domain, () => {
+      const sp = document.createElement('span');
+      sp.className = 'spark';
+      sp.textContent = (s.label || '?').charAt(0);
+      img.replaceWith(sp);
+    });
+    const label = document.createElement('span');
+    label.textContent = s.label;
+    row.appendChild(label);
+    row.addEventListener('click', () => {
+      favorites.push(s.id);
+      persistFavorites();
+      closeEngineAdd();
+      renderEngines();
+    });
+    menu.appendChild(row);
+  }
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = Math.round(r.left) + 'px';
+  menu.style.top = Math.round(r.bottom + 6) + 'px';
+  setTimeout(() => document.addEventListener('mousedown', onAddOutside, true), 0);
+}
+function onAddOutside(e) {
+  const menu = document.getElementById('engine-add');
+  if (menu && !menu.contains(e.target)) closeEngineAdd();
+}
+function closeEngineAdd() {
+  const menu = document.getElementById('engine-add');
+  if (menu) menu.remove();
+  document.removeEventListener('mousedown', onAddOutside, true);
+}
+
+// Right-click menu for a quick-pick chip.
+function openChipMenu(s, x, y) {
+  closeEngineAdd();
+  closeChipMenu();
+  const menu = document.createElement('div');
+  menu.id = 'chip-menu';
+  menu.className = 'engine-add chip-menu';
+  const item = (label, fn, danger) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ea-row' + (danger ? ' danger' : '');
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      closeChipMenu();
+      fn();
+    });
+    menu.appendChild(b);
+  };
+  item('Set as default', () => {
+    source = s;
+    window.hero.setSearchEngine(s.id);
+    input.placeholder = 'Search ' + s.label + ' or enter an address';
+    renderEngines();
+  });
+  if (favorites.length > 1) {
+    item('Remove from start page', () => {
+      favorites = favorites.filter((x) => x !== s.id);
+      persistFavorites();
+      renderEngines();
+    });
+  }
+  // Built-in engines cannot be deleted; custom engines (later) can.
+  if (s.custom) {
+    item('Delete engine', () => {
+      favorites = favorites.filter((x) => x !== s.id);
+      persistFavorites();
+      renderEngines();
+    }, true);
+  }
+  document.body.appendChild(menu);
+  menu.style.left = Math.min(x, window.innerWidth - 190) + 'px';
+  menu.style.top = y + 'px';
+  setTimeout(() => document.addEventListener('mousedown', onChipOutside, true), 0);
+}
+function onChipOutside(e) {
+  const menu = document.getElementById('chip-menu');
+  if (menu && !menu.contains(e.target)) closeChipMenu();
+}
+function closeChipMenu() {
+  const menu = document.getElementById('chip-menu');
+  if (menu) menu.remove();
+  document.removeEventListener('mousedown', onChipOutside, true);
 }
 
 // --- AI model pills ---
@@ -64,16 +254,15 @@ function renderModels() {
     chip.setAttribute('aria-selected', m.id === aiModel ? 'true' : 'false');
     if (m.domain) {
       const img = document.createElement('img');
-      img.src = `https://icons.duckduckgo.com/ip3/${m.domain}.ico`;
       img.alt = '';
       img.className = 'efav';
-      img.addEventListener('error', () => {
+      chip.appendChild(img);
+      applyFavicon(img, m.domain, () => {
         const sp = document.createElement('span');
         sp.className = 'spark';
         sp.textContent = '✦';
         img.replaceWith(sp);
       });
-      chip.appendChild(img);
     } else {
       const sp = document.createElement('span');
       sp.className = 'spark';
@@ -246,14 +435,13 @@ function renderTiles() {
     const dom = domainOf(d.url);
     if (dom) {
       const img = document.createElement('img');
-      img.src = `https://icons.duckduckgo.com/ip3/${dom}.ico`;
       img.alt = '';
       img.style.cssText = 'width:100%;height:100%;border-radius:7px;object-fit:cover';
-      img.addEventListener('error', () => {
+      ico.appendChild(img);
+      applyFavicon(img, dom, () => {
         img.remove();
         ico.textContent = letter;
       });
-      ico.appendChild(img);
     } else {
       ico.textContent = letter;
     }
@@ -325,6 +513,44 @@ window.hero
     }
   })
   .catch(() => {});
+
+// Engine list + current default, shared with the omnibox picker and settings.
+function syncEngine(id) {
+  const found = SOURCES.find((s) => s.id === id);
+  if (found) source = found;
+  renderEngines();
+  if (mode !== 'ai') input.placeholder = 'Search ' + source.label + ' or enter an address';
+}
+window.hero
+  .searchGet()
+  .then(({ current, list, favorites: fav }) => {
+    if (Array.isArray(list) && list.length) SOURCES = list;
+    const valid = (ids) => (ids || []).filter((id) => SOURCES.find((s) => s.id === id));
+    const v = valid(fav);
+    favorites = v.length ? v : SOURCES.slice(0, 3).map((s) => s.id);
+    syncEngine(current);
+  })
+  .catch(() => {});
+window.hero.onSearchEngine(syncEngine);
+// Quick-pick chips changed elsewhere (e.g. the settings engine manager).
+window.hero.onHeroEngines((ids) => {
+  if (!Array.isArray(ids)) return;
+  const v = ids.filter((id) => metaOf(id));
+  if (v.length) {
+    favorites = v;
+    renderEngines();
+  }
+});
+
+// Brand cursor: alternate / and _ in a fixed-width slot so "slash" never moves.
+const slEl = document.querySelector('#brand .sl');
+if (slEl) {
+  let slOn = true;
+  setInterval(() => {
+    slOn = !slOn;
+    slEl.textContent = slOn ? '/' : '_';
+  }, 550);
+}
 
 renderEngines();
 renderModels();

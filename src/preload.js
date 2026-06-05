@@ -34,4 +34,8 @@ contextBridge.exposeInMainWorld('slash', {
   onInfobar: (cb) => ipcRenderer.on('infobar:show', (_e, p) => cb(p)),
   onInfobarHide: (cb) => ipcRenderer.on('infobar:hide', () => cb()),
   infobarAction: (id, key) => ipcRenderer.send('infobar:action', { id, key }),
+  favicon: (host) => ipcRenderer.invoke('favicon:get', host),
+  profile: () => ipcRenderer.invoke('profile:get'),
+  searchGet: () => ipcRenderer.invoke('search:get'),
+  onSearchEngine: (cb) => ipcRenderer.on('search-engine', (_e, id) => cb(id)),
 });

@@ -1,6 +1,8 @@
 const $ = (id) => document.getElementById(id);
 
-const ENGINES = [
+// Filled from the shared engine list (search:get) so settings, the start page,
+// and the omnibox picker show the same engines.
+let ENGINES = [
   { id: 'duckduckgo', label: 'DuckDuckGo', domain: 'duckduckgo.com' },
   { id: 'google', label: 'Google', domain: 'google.com' },
   { id: 'wikipedia', label: 'Wikipedia', domain: 'wikipedia.org' },
@@ -11,13 +13,35 @@ const ACCENTS = ['#f1cb53', '#f0976c', '#8fd98a', '#6cc2f0', '#b79bf0', '#f08aa8
 
 let current = null;
 
-async function load() {
+let heroFavs = [];
+
+async function load(section) {
   current = await window.settings.get();
+  try {
+    const r = await window.settings.searchGet();
+    if (r && Array.isArray(r.list) && r.list.length) ENGINES = r.list;
+    if (r && Array.isArray(r.favorites)) heroFavs = r.favorites.slice();
+  } catch {
+    /* keep defaults */
+  }
   renderEngines();
   renderToggles();
   renderAccents();
   renderDefault();
-  renderImport();
+  renderMigrate();
+  renderVault();
+  scrollToSection(section);
+}
+
+// Jump to a section when opened from a shortcut (e.g. the profile menu).
+function scrollToSection(section) {
+  const el = section ? document.getElementById('sec-' + section) : null;
+  // Top of page by default so a plain open always starts clean.
+  window.scrollTo({ top: 0 });
+  if (el) {
+    // After layout settles (dynamic sections render async), bring it into view.
+    requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
 }
 
 async function renderDefault() {
@@ -38,53 +62,234 @@ $('set-default').addEventListener('click', async () => {
   setTimeout(renderDefault, 500);
 });
 
-async function renderImport() {
-  const wrap = $('import-list');
-  wrap.innerHTML = '';
+function fmt(n) {
+  return (n || 0).toLocaleString();
+}
+
+async function renderMigrate() {
+  const wrap = $('migrate-list');
+  wrap.innerHTML = '<div class="import-empty">Looking for browsers…</div>';
   let sources = [];
   try {
-    sources = await window.settings.importList();
+    sources = await window.settings.migrateSources();
   } catch {
     /* ignore */
   }
+  wrap.innerHTML = '';
   if (!sources.length) {
-    wrap.innerHTML = '<div class="import-empty">No other browsers found.</div>';
+    wrap.innerHTML = '<div class="import-empty">No other browsers found on this computer.</div>';
     return;
   }
   for (const s of sources) {
+    const card = document.createElement('div');
+    card.className = 'migrate-card';
+
+    const head = document.createElement('div');
+    head.className = 'migrate-head';
+    head.textContent = s.name;
+    card.appendChild(head);
+
+    const opts = document.createElement('div');
+    opts.className = 'migrate-opts';
+    const checks = {};
+    const addOpt = (key, label, enabled) => {
+      const lab = document.createElement('label');
+      lab.className = 'migrate-opt' + (enabled ? '' : ' off');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = enabled;
+      cb.disabled = !enabled;
+      checks[key] = cb;
+      lab.appendChild(cb);
+      const sp = document.createElement('span');
+      sp.textContent = label;
+      lab.appendChild(sp);
+      opts.appendChild(lab);
+    };
+    addOpt('bookmarks', `Bookmarks (${fmt(s.bookmarks)})`, s.bookmarks > 0);
+    addOpt('history', `History (${fmt(s.history)})`, s.history > 0);
+    addOpt('cookies', 'Stay signed in (cookies)', !!s.cookies);
+    addOpt('passwords', `Passwords (${fmt(s.passwords)})`, s.passwords > 0);
+    card.appendChild(opts);
+
+    const foot = document.createElement('div');
+    foot.className = 'migrate-foot';
+    const status = document.createElement('div');
+    status.className = 'migrate-status';
     const btn = document.createElement('button');
-    btn.className = 'btn import-btn';
+    btn.className = 'btn';
     btn.type = 'button';
-    btn.textContent = `${s.name} (${s.count})`;
+    btn.textContent = 'Import';
     btn.addEventListener('click', async () => {
+      const types = Object.keys(checks).filter((k) => checks[k].checked);
+      if (!types.length) {
+        status.textContent = 'Pick something to import.';
+        return;
+      }
       btn.disabled = true;
-      btn.textContent = `${s.name} · importing…`;
-      const r = await window.settings.importRun(s.id);
-      btn.textContent = `${s.name} · ${r.imported} added`;
+      btn.textContent = 'Importing…';
+      status.textContent = '';
+      let r = {};
+      try {
+        r = await window.settings.migrateRun(s.id, types);
+      } catch {
+        r = { error: 'import failed' };
+      }
+      btn.textContent = 'Done';
+      const parts = [];
+      if ('bookmarks' in r) parts.push(`${fmt(r.bookmarks)} bookmarks`);
+      if ('history' in r) parts.push(`${fmt(r.history)} history`);
+      if (r.cookies) {
+        let c = `${fmt(r.cookies.imported)} sessions kept`;
+        if (r.cookies.appBound) c += `, ${fmt(r.cookies.appBound)} protected`;
+        parts.push(c);
+      }
+      if (r.passwords) {
+        let p = `${fmt(r.passwords.imported)} passwords`;
+        if (r.passwords.appBound) p += `, ${fmt(r.passwords.appBound)} protected`;
+        parts.push(p);
+      }
+      const errs = [];
+      if (r.cookiesError) errs.push('cookies need the browser closed');
+      if (r.historyError) errs.push('history needs the browser closed');
+      if (r.passwordsError) errs.push('passwords need the browser closed');
+      status.textContent = (parts.join(' · ') || 'Nothing imported') + (errs.length ? ` (${errs.join('; ')})` : '');
+      renderVault();
     });
-    wrap.appendChild(btn);
+    foot.appendChild(status);
+    foot.appendChild(btn);
+    card.appendChild(foot);
+    wrap.appendChild(card);
   }
+}
+
+async function renderVault() {
+  const wrap = $('vault-list');
+  const desc = $('vault-desc');
+  let logins = [];
+  try {
+    logins = await window.settings.vaultList();
+  } catch {
+    /* ignore */
+  }
+  desc.textContent = logins.length
+    ? `${logins.length} saved login${logins.length === 1 ? '' : 's'}, encrypted on this device and filled only on the site they belong to.`
+    : 'Stored encrypted on this device and filled only on the site they belong to.';
+  wrap.innerHTML = '';
+  for (const l of logins) {
+    const row = document.createElement('div');
+    row.className = 'vault-row';
+    const info = document.createElement('div');
+    info.className = 'vault-info';
+    const host = document.createElement('div');
+    host.className = 'vault-host';
+    host.textContent = l.host;
+    const user = document.createElement('div');
+    user.className = 'vault-user';
+    user.textContent = l.username || '(no username)';
+    info.appendChild(host);
+    info.appendChild(user);
+    const del = document.createElement('button');
+    del.className = 'vault-del';
+    del.type = 'button';
+    del.setAttribute('aria-label', 'Remove login');
+    del.innerHTML = '&#10005;';
+    del.addEventListener('click', async () => {
+      await window.settings.vaultRemove(l.host, l.username);
+      renderVault();
+    });
+    row.appendChild(info);
+    row.appendChild(del);
+    wrap.appendChild(row);
+  }
+}
+
+$('import-csv').addEventListener('click', async () => {
+  const btn = $('import-csv');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+  let r = {};
+  try {
+    r = await window.settings.vaultImportCsv();
+  } catch {
+    r = { error: 'import failed' };
+  }
+  btn.disabled = false;
+  if (r.canceled) {
+    btn.textContent = 'Import from CSV';
+  } else if (r.error) {
+    btn.textContent = 'Import from CSV';
+    $('vault-desc').textContent = 'Could not read that CSV. Export passwords from your old browser and try again.';
+  } else {
+    btn.textContent = `Added ${r.added || 0}`;
+    setTimeout(() => (btn.textContent = 'Import from CSV'), 2500);
+    renderVault();
+  }
+});
+
+function engineFavicon(img, e) {
+  const firstParty = 'https://' + e.domain.replace(/^www\./, '') + '/favicon.ico';
+  img.addEventListener('error', () => img.remove(), { once: true });
+  window.settings
+    .favicon(e.domain)
+    .then((d) => {
+      img.src = d || firstParty;
+    })
+    .catch(() => {
+      img.src = firstParty;
+    });
 }
 
 function renderEngines() {
   const wrap = $('engines');
   wrap.innerHTML = '';
   for (const e of ENGINES) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip' + (e.id === current.searchEngine ? ' active' : '');
+    const row = document.createElement('div');
+    row.className = 'engine-row';
+
     const img = document.createElement('img');
-    img.src = `https://icons.duckduckgo.com/ip3/${e.domain}.ico`;
+    img.className = 'erow-fav';
     img.alt = '';
-    chip.appendChild(img);
-    const label = document.createElement('span');
-    label.textContent = e.label;
-    chip.appendChild(label);
-    chip.addEventListener('click', async () => {
+    engineFavicon(img, e);
+    row.appendChild(img);
+
+    const name = document.createElement('div');
+    name.className = 'erow-name';
+    name.textContent = e.label;
+    row.appendChild(name);
+
+    // Default selector.
+    const isDefault = e.id === current.searchEngine;
+    const def = document.createElement('button');
+    def.type = 'button';
+    def.className = 'erow-default' + (isDefault ? ' on' : '');
+    def.textContent = isDefault ? 'Default' : 'Set default';
+    def.addEventListener('click', async () => {
       current = await window.settings.set({ searchEngine: e.id });
       renderEngines();
     });
-    wrap.appendChild(chip);
+    row.appendChild(def);
+
+    // Start-page (quick-pick) star toggle.
+    const onHero = heroFavs.includes(e.id);
+    const star = document.createElement('button');
+    star.type = 'button';
+    star.className = 'erow-star' + (onHero ? ' on' : '');
+    star.title = onHero ? 'Showing on the start page' : 'Add to the start page';
+    star.setAttribute('aria-label', star.title);
+    star.innerHTML = onHero ? '&#9733;' : '&#9734;';
+    star.addEventListener('click', () => {
+      if (onHero) {
+        if (heroFavs.length > 1) heroFavs = heroFavs.filter((x) => x !== e.id);
+      } else {
+        heroFavs = [...heroFavs, e.id];
+      }
+      window.settings.setHeroEngines(heroFavs);
+      renderEngines();
+    });
+    row.appendChild(star);
+
+    wrap.appendChild(row);
   }
 }
 
