@@ -534,3 +534,13 @@
 .profile-badge.hidden {
   display: none;
 }
+
+/* Extensions toolbar (browser-action icons + popups) */
+browser-action-list,
+.ext-actions {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  --browser-action-padding: 4px;
+  --browser-action-button-size: 28px;
+}
