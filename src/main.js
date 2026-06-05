@@ -1413,13 +1413,9 @@ function createBrowserWindow(opts = {}) {
   });
   layout();
 
-  // At startup we restore last session's tabs (background tabs come back
-  // suspended/lazy). A window opened later (Ctrl+N) starts with a fresh hero tab.
-  if (opts.restore) {
-    restoreSession();
-    const startUrl = urlFromArgv(process.argv);
-    if (startUrl) createTab({ url: startUrl, activate: true });
-  }
+  // A restored window gets its saved tabs (background tabs come back suspended/
+  // lazy); a window opened later (Ctrl+N) starts with a fresh hero tab.
+  if (opts.session) restoreSessionInto(opts.session);
   if (!S.tabs.length) createTab(); // nothing restored / fresh window: a hero tab
   return W;
 }
@@ -1428,13 +1424,17 @@ function createBrowserWindow(opts = {}) {
 function sessionPath() {
   return path.join(app.getPath('userData'), 'slash-session.json');
 }
-function saveSession() {
-  // Private S.tabs are ephemeral and never restored.
-  const open = S.tabs.filter((t) => !t.onHero && !t.private && (t.url || t.suspended));
+// One window's restorable tabs (private tabs are ephemeral and never saved).
+function sessionForWindow(W) {
+  const open = W.tabs.filter((t) => !t.onHero && !t.private && (t.url || t.suspended));
   const list = open.map((t) => ({ url: t.url, title: t.title, pinned: !!t.pinned }));
-  const active = Math.max(0, open.findIndex((t) => t.id === S.activeTabId));
+  const active = Math.max(0, open.findIndex((t) => t.id === W.activeTabId));
+  return { tabs: list, active };
+}
+function saveSession() {
   try {
-    fs.writeFileSync(sessionPath(), JSON.stringify({ tabs: list, active }), 'utf8');
+    const list = windows.map(sessionForWindow).filter((w) => w.tabs.length);
+    fs.writeFileSync(sessionPath(), JSON.stringify({ windows: list }), 'utf8');
   } catch {
     /* best effort */
   }
@@ -1447,13 +1447,9 @@ function scheduleSessionSave() {
     saveSession();
   }, 1500);
 }
-function restoreSession() {
-  let sess;
-  try {
-    sess = JSON.parse(fs.readFileSync(sessionPath(), 'utf8'));
-  } catch {
-    return;
-  }
+// Restore one window's tabs into the current window (S). Operates on S because
+// it runs inside createBrowserWindow for the window being built.
+function restoreSessionInto(sess) {
   if (!sess || !Array.isArray(sess.tabs) || !sess.tabs.length) return;
   for (const t of sess.tabs) {
     if (!t || !t.url || !/^https?:\/\//i.test(t.url)) continue;
@@ -1481,6 +1477,30 @@ function restoreSession() {
   const idx = Math.min(Math.max(0, sess.active | 0), S.tabs.length - 1);
   activateTab(S.tabs[idx].id); // wakes + loads just the active one
   layout();
+}
+
+// At startup, recreate every window that was open last time (each with its own
+// tabs). Back-compatible with the old single-window { tabs, active } shape.
+function restoreWindows() {
+  let saved = null;
+  try {
+    saved = JSON.parse(fs.readFileSync(sessionPath(), 'utf8'));
+  } catch {
+    /* no session */
+  }
+  let wins = [];
+  if (saved && Array.isArray(saved.windows)) wins = saved.windows.filter((w) => w && Array.isArray(w.tabs) && w.tabs.length);
+  else if (saved && Array.isArray(saved.tabs) && saved.tabs.length) wins = [saved]; // legacy
+  const startUrl = urlFromArgv(process.argv);
+  if (!wins.length) {
+    createBrowserWindow();
+    if (startUrl) createTab({ url: startUrl, activate: true });
+    return;
+  }
+  wins.forEach((wsess, i) => {
+    createBrowserWindow({ session: wsess });
+    if (i === 0 && startUrl) createTab({ url: startUrl, activate: true });
+  });
 }
 
 // --- AI prompt building + routing (unchanged behavior) ---
@@ -1790,7 +1810,7 @@ app.whenReady().then(() => {
   applyDoh();
   setupPermissions();
   setupDownloads();
-  createBrowserWindow({ restore: true });
+  restoreWindows();
   setupBlocker();
   registerAsBrowser(); // make Slash selectable in Windows Default Apps (packaged)
   loadSavedExtensions(); // re-load unpacked extensions the user added
