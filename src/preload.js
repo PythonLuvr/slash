@@ -41,4 +41,5 @@ contextBridge.exposeInMainWorld('slash', {
   onSearchList: (cb) => ipcRenderer.on('search-list', (_e, list) => cb(list)),
   onAddEngine: (cb) => ipcRenderer.on('add-engine', (_e, info) => cb(info)),
   addCurrentEngine: () => ipcRenderer.invoke('engine:add-current'),
+  tabMenu: (id, x, y) => ipcRenderer.send('tab:menu', { id, x, y }),
 });

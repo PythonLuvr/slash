@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const KINDS = ['menu', 'profile', 'downloads', 'history', 'siteinfo', 'shield', 'setup', 'enginepick'];
+const KINDS = ['menu', 'profile', 'downloads', 'history', 'siteinfo', 'shield', 'setup', 'enginepick', 'tabmenu'];
 
 const hsearch = $('hsearch');
 
@@ -40,6 +40,17 @@ function renderProfile() {
     })
     .catch(() => {});
 }
+
+// Tab context menu: show pin or unpin depending on the tab's current state.
+window.overlay.onTabmenu(({ pinned }) => {
+  const pinBtn = document.querySelector('#tabmenu [data-tab="pin"]');
+  const unpinBtn = document.querySelector('#tabmenu [data-tab="unpin"]');
+  if (pinBtn) pinBtn.classList.toggle('hidden', !!pinned);
+  if (unpinBtn) unpinBtn.classList.toggle('hidden', !pinned);
+});
+document.querySelectorAll('#tabmenu .pop-item[data-tab]').forEach((btn) => {
+  btn.addEventListener('click', () => window.overlay.tabAction(btn.dataset.tab));
+});
 
 // Search-engine picker (opened from the omnibox button). Sets the one default.
 window.overlay.onEnginepick(({ current, list }) => {

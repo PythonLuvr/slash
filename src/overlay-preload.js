@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('overlay', {
   openSetup: () => ipcRenderer.send('pop:setup'),
   setSearchEngine: (id) => ipcRenderer.send('search:set', id),
   onEnginepick: (cb) => ipcRenderer.on('enginepick', (_e, data) => cb(data)),
+  onTabmenu: (cb) => ipcRenderer.on('tabmenu', (_e, data) => cb(data)),
+  tabAction: (action) => ipcRenderer.send('tab:action', action),
   favicon: (host) => ipcRenderer.invoke('favicon:get', host),
   // First-run setup picker (make default + import from another browser).
   setDefault: () => ipcRenderer.invoke('default:set'),

@@ -64,7 +64,8 @@ function renderTabs(list) {
   tabsEl.innerHTML = '';
   for (const t of list) {
     const tab = document.createElement('div');
-    tab.className = 'tab' + (t.active ? ' active' : '') + (t.suspended ? ' suspended' : '');
+    tab.className =
+      'tab' + (t.active ? ' active' : '') + (t.suspended ? ' suspended' : '') + (t.pinned ? ' pinned' : '');
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', t.active ? 'true' : 'false');
     tab.tabIndex = t.active ? 0 : -1;
@@ -82,30 +83,38 @@ function renderTabs(list) {
       tab.appendChild(fallbackIcon());
     }
 
-    const title = document.createElement('span');
-    title.className = 'title';
-    title.textContent = t.title;
-    tab.appendChild(title);
+    // Pinned tabs are compact: favicon only, no title or close button.
+    if (!t.pinned) {
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = t.title;
+      tab.appendChild(title);
 
-    const close = document.createElement('button');
-    close.className = 'close';
-    close.type = 'button';
-    close.setAttribute('aria-label', 'Close tab');
-    close.title = 'Close (Ctrl+W)';
-    close.innerHTML = '&#10005;';
-    close.addEventListener('click', (e) => {
-      e.stopPropagation();
-      window.slash.closeTab(t.id);
-    });
-    tab.appendChild(close);
+      const close = document.createElement('button');
+      close.className = 'close';
+      close.type = 'button';
+      close.setAttribute('aria-label', 'Close tab');
+      close.title = 'Close (Ctrl+W)';
+      close.innerHTML = '&#10005;';
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.slash.closeTab(t.id);
+      });
+      tab.appendChild(close);
+    }
 
     tab.addEventListener('click', () => window.slash.activateTab(t.id));
-    // middle-click closes
+    // middle-click closes (pinned tabs ignore it so they aren't lost by accident)
     tab.addEventListener('auxclick', (e) => {
-      if (e.button === 1) {
+      if (e.button === 1 && !t.pinned) {
         e.preventDefault();
         window.slash.closeTab(t.id);
       }
+    });
+    // right-click opens the tab menu (pin/unpin/close/...)
+    tab.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      window.slash.tabMenu(t.id, e.clientX, e.clientY);
     });
     tabsEl.appendChild(tab);
   }

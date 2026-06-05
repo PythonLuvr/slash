@@ -109,7 +109,10 @@ const POP_SIZES = {
   shield: { w: 268, h: 150 },
   setup: { w: 344, h: 440 },
   enginepick: { w: 216, h: 344 },
+  tabmenu: { w: 188, h: 172 },
 };
+let tabMenuTarget = null; // tab id the tab context menu acts on
+let tabMenuPos = { x: 0, y: 0 };
 
 // Top-right cluster popovers anchor right; site-info anchors under the omnibox;
 // the first-run setup picker centers under the toolbar.
@@ -117,6 +120,10 @@ function popoverPos(kind, s, width) {
   if (kind === 'setup') return { x: Math.max(10, Math.round((width - s.w) / 2)), y: CHROME_HEIGHT };
   // The engine picker drops under its button at the left of the omnibox.
   if (kind === 'enginepick') return { x: OMNIBOX_LEFT, y: CHROME_HEIGHT };
+  // The tab context menu opens at the cursor (clamped to the window).
+  if (kind === 'tabmenu') {
+    return { x: Math.max(6, Math.min(tabMenuPos.x, width - s.w - 6)), y: Math.max(CHROME_HEIGHT - 4, tabMenuPos.y) };
+  }
   const x = kind === 'siteinfo' ? 12 : Math.max(0, width - s.w - 10);
   return { x, y: CHROME_HEIGHT };
 }
@@ -520,9 +527,28 @@ function sendTabs() {
       active: t.id === activeTabId,
       loading: t.loading,
       suspended: !!t.suspended,
+      pinned: !!t.pinned,
     })),
   );
   scheduleSessionSave(); // persist the open-tab set for next launch
+}
+
+// Pinned tabs sort to the front; a stable sort preserves order within groups.
+function reorderPinned() {
+  tabs.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+}
+function setPinned(id, pinned) {
+  const tab = tabs.find((t) => t.id === id);
+  if (!tab || tab.pinned === pinned) return;
+  tab.pinned = pinned;
+  reorderPinned();
+  sendTabs();
+}
+function closeOtherTabs(id) {
+  // Close every non-pinned tab except the target.
+  for (const t of tabs.slice()) {
+    if (t.id !== id && !t.pinned) closeTab(t.id);
+  }
 }
 
 // --- Layout / visibility ---
@@ -809,6 +835,10 @@ function showPopover(kind) {
   if (kind === 'enginepick') {
     popoverView.webContents.send('enginepick', { current: readSettings().searchEngine, list: allEngineMeta() });
   }
+  if (kind === 'tabmenu') {
+    const t = tabs.find((x) => x.id === tabMenuTarget);
+    popoverView.webContents.send('tabmenu', { pinned: !!(t && t.pinned) });
+  }
   popoverView.webContents.focus();
   popKind = kind;
 }
@@ -976,6 +1006,7 @@ function createTab(opts = {}) {
     onAIPage: false, // showing the full-screen slash://ai page
     lastActive: Date.now(), // for idle-based suspension
     suspended: false, // renderer freed; url/title/favicon kept
+    pinned: false, // pinned tabs sit first, compact, and survive "close others"
   };
   attachTabView(tab);
   tabs.push(tab);
@@ -1256,7 +1287,7 @@ function sessionPath() {
 }
 function saveSession() {
   const open = tabs.filter((t) => !t.onHero && (t.url || t.suspended));
-  const list = open.map((t) => ({ url: t.url, title: t.title }));
+  const list = open.map((t) => ({ url: t.url, title: t.title, pinned: !!t.pinned }));
   const active = Math.max(0, open.findIndex((t) => t.id === activeTabId));
   try {
     fs.writeFileSync(sessionPath(), JSON.stringify({ tabs: list, active }), 'utf8');
@@ -1299,6 +1330,7 @@ function restoreSession() {
       onAIPage: false,
       lastActive: Date.now(),
       suspended: true,
+      pinned: !!t.pinned,
     });
   }
   if (!tabs.length) return;
@@ -2008,6 +2040,24 @@ ipcMain.on('tab:new', () => createTab());
 ipcMain.on('tab:close', (_e, id) => closeTab(id));
 ipcMain.on('tab:activate', (_e, id) => activateTab(id));
 ipcMain.on('tab:reopen', () => reopenClosed());
+ipcMain.on('tab:menu', (_e, { id, x, y }) => {
+  tabMenuTarget = id;
+  tabMenuPos = { x: x | 0, y: y | 0 };
+  showPopover('tabmenu');
+});
+ipcMain.on('tab:action', (_e, action) => {
+  const id = tabMenuTarget;
+  hidePopover();
+  if (!id) return;
+  const tab = tabs.find((t) => t.id === id);
+  if (action === 'pin') setPinned(id, true);
+  else if (action === 'unpin') setPinned(id, false);
+  else if (action === 'close') closeTab(id);
+  else if (action === 'close-others') closeOtherTabs(id);
+  else if (action === 'newtab') createTab();
+  else if (action === 'reopen') reopenClosed();
+  else if (action === 'duplicate' && tab && tab.url) createTab({ url: tab.url, activate: true });
+});
 
 // --- IPC: AI panel ---
 ipcMain.on('toggle-ai', () => toggleAI());
