@@ -18,7 +18,33 @@ window.overlay.onShow((kind) => {
 
 // The profile is just your computer account: friendly name + account picture
 // (or a monogram), read locally with no sign-in.
+function renderProfilesList() {
+  const wrap = $('pf-list');
+  if (!wrap || !window.overlay.profilesList) return;
+  window.overlay
+    .profilesList()
+    .then((list) => {
+      wrap.innerHTML = '';
+      for (const p of list || []) {
+        const b = document.createElement('button');
+        b.className = 'pop-item pf-row';
+        const dot = document.createElement('span');
+        dot.className = 'pf-dot';
+        dot.style.background = p.color || '#f1cb53';
+        b.appendChild(dot);
+        b.appendChild(document.createTextNode(p.name || p.id));
+        b.addEventListener('click', () => {
+          window.overlay.openProfileWindow(p.id);
+          window.overlay.close();
+        });
+        wrap.appendChild(b);
+      }
+    })
+    .catch(() => {});
+}
+
 function renderProfile() {
+  renderProfilesList();
   window.overlay
     .profile()
     .then((p) => {
@@ -127,6 +153,8 @@ const ACTIONS = {
   // Profile menu: passwords and privacy jump to their settings section.
   passwords: () => window.overlay.openSettingsPage('passwords'),
   privacy: () => window.overlay.openSettingsPage('privacy'),
+  'new-profile': () => window.overlay.createProfile && window.overlay.createProfile(),
+  'manage-profiles': () => window.overlay.openSettingsPage('profiles'),
 };
 
 document.querySelectorAll('.pop-item[data-act]').forEach((btn) => {

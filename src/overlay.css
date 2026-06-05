@@ -635,3 +635,21 @@ body {
   background: var(--raised-2);
   color: var(--ink);
 }
+
+/* Profile switcher rows in the profile popover */
+.pf-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.pf-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--accent);
+}
+#pf-list {
+  display: flex;
+  flex-direction: column;
+}

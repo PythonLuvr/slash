@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('settings', {
   extList: () => ipcRenderer.invoke('extensions:list'),
   extRemove: (id) => ipcRenderer.invoke('extensions:remove', id),
   extStore: () => ipcRenderer.invoke('extensions:store'),
+  profilesList: () => ipcRenderer.invoke('profiles:list'),
+  profilesCreate: (name, color) => ipcRenderer.invoke('profiles:create', { name, color }),
+  profilesRename: (id, name) => ipcRenderer.invoke('profiles:rename', { id, name }),
+  profilesRecolor: (id, color) => ipcRenderer.invoke('profiles:recolor', { id, color }),
+  profilesDelete: (id) => ipcRenderer.invoke('profiles:delete', id),
+  openProfileWindow: (id) => ipcRenderer.send('profile:open-window', id),
   // Migration (bookmarks / history / cookies) from another browser.
   migrateSources: () => ipcRenderer.invoke('migrate:sources'),
   migrateRun: (id, types) => ipcRenderer.invoke('migrate:run', { id, types }),

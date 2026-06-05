@@ -31,7 +31,66 @@ async function load(section) {
   renderMigrate();
   renderVault();
   renderExtensions();
+  renderProfiles();
   scrollToSection(section);
+}
+
+// --- Profiles (Work / School / ...) ---
+async function renderProfiles() {
+  const wrap = $('profiles-list');
+  if (!wrap || !window.settings.profilesList) return;
+  let list = [];
+  try {
+    list = await window.settings.profilesList();
+  } catch {
+    /* ignore */
+  }
+  wrap.innerHTML = '';
+  for (const p of list) {
+    const row = document.createElement('div');
+    row.className = 'profile-row';
+    const color = document.createElement('input');
+    color.type = 'color';
+    color.value = p.color || '#f1cb53';
+    color.className = 'pf-color';
+    color.addEventListener('change', () => window.settings.profilesRecolor(p.id, color.value));
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.value = p.name;
+    name.maxLength = 40;
+    name.className = 'pf-name-in';
+    name.addEventListener('change', () => window.settings.profilesRename(p.id, name.value.trim() || p.name));
+    const open = document.createElement('button');
+    open.className = 'btn';
+    open.textContent = 'Open';
+    open.addEventListener('click', () => window.settings.openProfileWindow(p.id));
+    row.appendChild(color);
+    row.appendChild(name);
+    row.appendChild(open);
+    if (p.id !== 'default') {
+      const del = document.createElement('button');
+      del.className = 'vault-del';
+      del.innerHTML = '&#10005;';
+      del.title = 'Delete profile and its data';
+      del.addEventListener('click', async () => {
+        if (window.confirm && !window.confirm('Delete "' + p.name + '" and all its data? This cannot be undone.')) return;
+        await window.settings.profilesDelete(p.id);
+        renderProfiles();
+      });
+      row.appendChild(del);
+    }
+    wrap.appendChild(row);
+  }
+}
+const pfCreate = $('pf-create');
+if (pfCreate) {
+  pfCreate.addEventListener('click', async () => {
+    const name = ($('pf-new-name').value || '').trim();
+    if (!name) return;
+    await window.settings.profilesCreate(name, $('pf-new-color').value);
+    $('pf-new-name').value = '';
+    renderProfiles();
+  });
 }
 
 // Jump to a section when opened from a shortcut (e.g. the profile menu).

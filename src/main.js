@@ -10,6 +10,7 @@ const { autoUpdater } = require('electron-updater');
 const store = require('./lib/store');
 const migrate = require('./lib/migrate');
 const { migrateToProfiles } = require('./lib/migrate-profiles');
+const profiles = require('./lib/profiles');
 const vault = require('./lib/vault');
 const favicons = require('./lib/favicons');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
@@ -143,6 +144,25 @@ function useWindow(W) {
   if (W) {
     store.setProfile(W.profileId);
     vault.setProfile(W.profileId);
+  }
+}
+// Reflect a window's profile in its title and tell its chrome (for a badge/tint).
+function applyWindowProfile(W) {
+  if (!W || !W.win || W.win.isDestroyed()) return;
+  const p = profiles.getProfile(W.profileId);
+  const name = (p && p.name) || 'Personal';
+  try {
+    W.win.setTitle(W.profileId === 'default' ? 'Slash' : 'Slash (' + name + ')');
+  } catch {
+    /* ignore */
+  }
+  if (W.chromeView) {
+    W.chromeView.webContents.send('profile-window', {
+      id: W.profileId,
+      name,
+      color: (p && p.color) || '#f1cb53',
+      isDefault: W.profileId === 'default',
+    });
   }
 }
 
@@ -1505,6 +1525,7 @@ function createBrowserWindow(opts = {}) {
   // lazy); a window opened later (Ctrl+N) starts with a fresh hero tab.
   if (opts.session) restoreSessionInto(opts.session);
   if (!S.tabs.length) createTab(); // nothing restored / fresh window: a hero tab
+  applyWindowProfile(W); // window title (+ chrome badge) for its profile
   return W;
 }
 
@@ -1517,7 +1538,7 @@ function sessionForWindow(W) {
   const open = W.tabs.filter((t) => !t.onHero && !t.private && (t.url || t.suspended));
   const list = open.map((t) => ({ url: t.url, title: t.title, pinned: !!t.pinned }));
   const active = Math.max(0, open.findIndex((t) => t.id === W.activeTabId));
-  return { tabs: list, active };
+  return { profileId: W.profileId || 'default', tabs: list, active };
 }
 function saveSession() {
   try {
@@ -1586,7 +1607,9 @@ function restoreWindows() {
     return;
   }
   wins.forEach((wsess, i) => {
-    createBrowserWindow({ session: wsess });
+    // Skip windows whose profile was deleted; fall back to default.
+    const pid = wsess.profileId && profiles.getProfile(wsess.profileId) ? wsess.profileId : 'default';
+    createBrowserWindow({ profileId: pid, session: wsess });
     if (i === 0 && startUrl) createTab({ url: startUrl, activate: true });
   });
 }
@@ -2723,6 +2746,55 @@ handleWin('profile:get', () => {
   } catch {
     return { name: 'You', username: '', picture: '' };
   }
+});
+
+// --- IPC: user profiles (Work / School / ...): create, switch, manage ---
+handleWin('profiles:list', () => profiles.listProfiles());
+handleWin('profiles:current', () => profiles.getProfile(S.profileId) || { id: S.profileId, name: 'Personal' });
+function broadcastProfiles() {
+  const list = profiles.listProfiles();
+  for (const W of windows) {
+    if (W.popoverView) W.popoverView.webContents.send('profiles', { list, current: W.profileId });
+    if (W.settingsView) W.settingsView.webContents.send('profiles', { list, current: W.profileId });
+  }
+}
+// Open a window running the given profile (creating a fresh window for it).
+onWin('profile:open-window', (_e, id) => {
+  if (!profiles.getProfile(id)) return;
+  createBrowserWindow({ profileId: id });
+});
+handleWin('profiles:create', (_e, { name, color } = {}) => {
+  const p = profiles.createProfile({ name, color });
+  createBrowserWindow({ profileId: p.id }); // open it right away
+  broadcastProfiles();
+  return p;
+});
+handleWin('profiles:rename', (_e, { id, name } = {}) => {
+  const p = profiles.renameProfile(id, name);
+  windows.filter((W) => W.profileId === id).forEach((W) => applyWindowProfile(W));
+  broadcastProfiles();
+  return p;
+});
+handleWin('profiles:recolor', (_e, { id, color } = {}) => {
+  const p = profiles.recolorProfile(id, color);
+  windows.filter((W) => W.profileId === id).forEach((W) => applyWindowProfile(W));
+  broadcastProfiles();
+  return p;
+});
+handleWin('profiles:delete', (_e, id) => {
+  // Close any windows running this profile first, then drop its data.
+  for (const W of [...windows]) {
+    if (W.profileId === id) {
+      try {
+        W.win.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  const r = profiles.deleteProfile(id);
+  broadcastProfiles();
+  return r;
 });
 
 // --- IPC: favicons (served from the local cache, never a 3rd-party service) ---
