@@ -12,7 +12,16 @@ const fs = require('fs');
 
 const ENC_PREFIX = 'enc:v1:';
 
+// Saved logins are per profile; the app sets the active profile when the
+// operated window changes.
+let currentProfile = 'default';
+function setProfile(id) {
+  currentProfile = id || 'default';
+}
 function vaultPath() {
+  return path.join(app.getPath('userData'), 'profiles', currentProfile, 'vault.json');
+}
+function legacyVaultPath() {
   return path.join(app.getPath('userData'), 'slash-vault.json');
 }
 
@@ -30,7 +39,12 @@ function read() {
   try {
     raw = JSON.parse(fs.readFileSync(vaultPath(), 'utf8'));
   } catch {
-    return [];
+    try {
+      if (currentProfile !== 'default') return [];
+      raw = JSON.parse(fs.readFileSync(legacyVaultPath(), 'utf8')); // pre-migration
+    } catch {
+      return [];
+    }
   }
   try {
     if (raw && typeof raw.enc === 'string' && raw.enc.startsWith(ENC_PREFIX)) {
@@ -196,4 +210,4 @@ function importCsv(text) {
   return { added, updated, skipped };
 }
 
-module.exports = { upsert, forOrigin, list, remove, count, importCsv };
+module.exports = { setProfile, upsert, forOrigin, list, remove, count, importCsv };

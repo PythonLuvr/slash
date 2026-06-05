@@ -1,24 +1,37 @@
-// Local, per-user settings store. Lives in the OS app-data directory
-// (app.getPath('userData')), never in the repo. Holds the AI model selection,
-// BYOK API keys, editable model ids, accent, and privacy options.
+// Local, per-user settings store. App-level prefs (AI selection, BYOK keys,
+// editable model ids, accent, privacy defaults) live in slash-settings.json and
+// are shared across profiles. Profile-level prefs (search engine, hero engines,
+// custom engines, blocked-password hosts, loaded extensions) live per profile in
+// userData/profiles/<id>/settings.json.
 //
 // API keys are encrypted at rest with Electron safeStorage (Windows DPAPI /
-// macOS Keychain / Linux libsecret) when available, and never leave the
-// machine except to the provider you select. If OS encryption is unavailable
-// they fall back to plaintext, the same as most BYOK desktop apps.
+// macOS Keychain / Linux libsecret) when available, and never leave the machine
+// except to the provider you select. If OS encryption is unavailable they fall
+// back to plaintext, the same as most BYOK desktop apps.
+//
+// The readSettings()/writeSettings() signatures are unchanged and default to the
+// "default" profile; a later step threads the active profile id through.
 
 const { app, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+const DEFAULT_PROFILE = 'default';
+
 function settingsPath() {
   return path.join(app.getPath('userData'), 'slash-settings.json');
 }
-
 // Pre-rename file. Read once for migration so existing keys/accent survive.
 function legacySettingsPath() {
   return path.join(app.getPath('userData'), 'loom-settings.json');
 }
+function profileSettingsPath(profileId) {
+  return path.join(app.getPath('userData'), 'profiles', profileId || DEFAULT_PROFILE, 'settings.json');
+}
+
+// Which keys are shared app-wide vs stored per profile.
+const PROFILE_KEYS = ['searchEngine', 'heroEngines', 'customEngines', 'pwBlocked', 'extensions'];
+const APP_KEYS = ['selection', 'apiKeys', 'apiModels', 'accent', 'doh', 'httpsOnly', 'blockAds', 'seenDefaultPrompt', 'updatesEnabled'];
 
 // Sensible, editable defaults. Nothing here is secret or user-specific.
 const DEFAULTS = {
@@ -87,42 +100,45 @@ function mapKeys(obj, fn) {
   return out;
 }
 
-function readSettings() {
+function readJson(p) {
   try {
-    let raw;
-    try {
-      raw = fs.readFileSync(settingsPath(), 'utf8');
-    } catch {
-      // Fall back to the pre-rename file (loom-settings.json) if present.
-      raw = fs.readFileSync(legacySettingsPath(), 'utf8');
-    }
-    const parsed = JSON.parse(raw);
-    const storedKeys = { ...DEFAULTS.apiKeys, ...(parsed.apiKeys || {}) };
-    return {
-      selection: { ...DEFAULTS.selection, ...(parsed.selection || {}) },
-      apiKeys: mapKeys(storedKeys, decryptKey), // plaintext, for the app to use
-      apiModels: { ...DEFAULTS.apiModels, ...(parsed.apiModels || {}) },
-      accent: parsed.accent || DEFAULTS.accent,
-      searchEngine: parsed.searchEngine || DEFAULTS.searchEngine,
-      heroEngines: Array.isArray(parsed.heroEngines) ? parsed.heroEngines : DEFAULTS.heroEngines,
-      customEngines: Array.isArray(parsed.customEngines) ? parsed.customEngines : DEFAULTS.customEngines,
-      pwBlocked: Array.isArray(parsed.pwBlocked) ? parsed.pwBlocked : DEFAULTS.pwBlocked,
-      extensions: Array.isArray(parsed.extensions) ? parsed.extensions : DEFAULTS.extensions,
-      doh: typeof parsed.doh === 'boolean' ? parsed.doh : DEFAULTS.doh,
-      httpsOnly: typeof parsed.httpsOnly === 'boolean' ? parsed.httpsOnly : DEFAULTS.httpsOnly,
-      blockAds: typeof parsed.blockAds === 'boolean' ? parsed.blockAds : DEFAULTS.blockAds,
-      seenDefaultPrompt:
-        typeof parsed.seenDefaultPrompt === 'boolean' ? parsed.seenDefaultPrompt : DEFAULTS.seenDefaultPrompt,
-      updatesEnabled:
-        typeof parsed.updatesEnabled === 'boolean' ? parsed.updatesEnabled : DEFAULTS.updatesEnabled,
-    };
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch {
-    return clone(DEFAULTS);
+    return null;
   }
 }
 
-function writeSettings(patch) {
-  const cur = readSettings(); // plaintext keys
+function readSettings(profileId = DEFAULT_PROFILE) {
+  // App-level file (with legacy loom fallback).
+  const appRaw = readJson(settingsPath()) || readJson(legacySettingsPath()) || {};
+  // Profile-level file; if missing, fall back to legacy values still in the
+  // app-level file (pre-split installs), then defaults.
+  const profRaw = readJson(profileSettingsPath(profileId)) || {};
+  const pick = (k) => (k in profRaw ? profRaw[k] : appRaw[k]);
+
+  const storedKeys = { ...DEFAULTS.apiKeys, ...(appRaw.apiKeys || {}) };
+  const arr = (v, d) => (Array.isArray(v) ? v : d);
+  const bool = (v, d) => (typeof v === 'boolean' ? v : d);
+  return {
+    selection: { ...DEFAULTS.selection, ...(appRaw.selection || {}) },
+    apiKeys: mapKeys(storedKeys, decryptKey), // plaintext, for the app to use
+    apiModels: { ...DEFAULTS.apiModels, ...(appRaw.apiModels || {}) },
+    accent: appRaw.accent || DEFAULTS.accent,
+    searchEngine: pick('searchEngine') || DEFAULTS.searchEngine,
+    heroEngines: arr(pick('heroEngines'), DEFAULTS.heroEngines),
+    customEngines: arr(pick('customEngines'), DEFAULTS.customEngines),
+    pwBlocked: arr(pick('pwBlocked'), DEFAULTS.pwBlocked),
+    extensions: arr(pick('extensions'), DEFAULTS.extensions),
+    doh: bool(appRaw.doh, DEFAULTS.doh),
+    httpsOnly: bool(appRaw.httpsOnly, DEFAULTS.httpsOnly),
+    blockAds: bool(appRaw.blockAds, DEFAULTS.blockAds),
+    seenDefaultPrompt: bool(appRaw.seenDefaultPrompt, DEFAULTS.seenDefaultPrompt),
+    updatesEnabled: bool(appRaw.updatesEnabled, DEFAULTS.updatesEnabled),
+  };
+}
+
+function writeSettings(patch, profileId = DEFAULT_PROFILE) {
+  const cur = readSettings(profileId); // plaintext keys
   const next = {
     selection: { ...cur.selection, ...(patch.selection || {}) },
     apiKeys: { ...cur.apiKeys, ...(patch.apiKeys || {}) },
@@ -141,11 +157,22 @@ function writeSettings(patch) {
     updatesEnabled:
       typeof patch.updatesEnabled === 'boolean' ? patch.updatesEnabled : cur.updatesEnabled,
   };
-  // Encrypt keys for disk; the returned object keeps plaintext for the app.
-  const onDisk = { ...next, apiKeys: mapKeys(next.apiKeys, encryptKey) };
+
+  // App-level subset (keys encrypted for disk).
+  const appObj = {};
+  for (const k of APP_KEYS) appObj[k] = next[k];
+  appObj.apiKeys = mapKeys(next.apiKeys, encryptKey);
   fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
-  fs.writeFileSync(settingsPath(), JSON.stringify(onDisk, null, 2), 'utf8');
-  return next;
+  fs.writeFileSync(settingsPath(), JSON.stringify(appObj, null, 2), 'utf8');
+
+  // Profile-level subset.
+  const profObj = {};
+  for (const k of PROFILE_KEYS) profObj[k] = next[k];
+  const pp = profileSettingsPath(profileId);
+  fs.mkdirSync(path.dirname(pp), { recursive: true });
+  fs.writeFileSync(pp, JSON.stringify(profObj, null, 2), 'utf8');
+
+  return next; // plaintext for the app
 }
 
-module.exports = { readSettings, writeSettings, DEFAULTS, settingsPath };
+module.exports = { readSettings, writeSettings, DEFAULTS, settingsPath, PROFILE_KEYS, APP_KEYS };

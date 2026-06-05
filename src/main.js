@@ -9,12 +9,14 @@ const { startMcpServer } = require('./lib/mcp-server');
 const { autoUpdater } = require('electron-updater');
 const store = require('./lib/store');
 const migrate = require('./lib/migrate');
+const { migrateToProfiles } = require('./lib/migrate-profiles');
+const profiles = require('./lib/profiles');
 const vault = require('./lib/vault');
 const favicons = require('./lib/favicons');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
 const { installChromeWebStore } = require('electron-chrome-web-store');
 
-let extensions = null; // Chrome-extension API layer (set up on the window)
+const extByProfile = new Map(); // one ElectronChromeExtensions per profile session
 
 app.setName('Slash');
 // Windows taskbar / notification identity (so it groups as Slash, not Electron).
@@ -45,10 +47,10 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', (_e, argv) => {
     const url = urlFromArgv(argv);
-    if (win) {
+    if (S.win) {
       if (url) createTab({ url, activate: true });
-      if (win.isMinimized()) win.restore();
-      win.focus();
+      if (S.win.isMinimized()) S.win.restore();
+      S.win.focus();
     }
   });
 }
@@ -59,8 +61,6 @@ const TOOLBAR_HEIGHT = 56;
 const BOOKMARKS_HEIGHT = 34;
 const INFOBAR_HEIGHT = 40;
 const BASE_CHROME = TABSTRIP_HEIGHT + TOOLBAR_HEIGHT + BOOKMARKS_HEIGHT;
-let CHROME_HEIGHT = BASE_CHROME; // grows by INFOBAR_HEIGHT while an infobar shows
-let infobarOpen = false;
 const FIND_W = 360;
 const FIND_HEIGHT = 44;
 const AI_WIDTH = 400;
@@ -83,27 +83,10 @@ const SECURE_PREFS = {
 // (writable) rather than next to the app, which is read-only inside the asar.
 let AI_CWD = null;
 
-let win;
-let chromeView; // tab strip + toolbar + bookmarks (trusted)
-let heroView; // shared start page, shown for any tab that has not navigated
-let aiView; // docked AI panel (trusted)
-let aiPageView; // full-screen slash://ai conversation (trusted, content area)
-let popoverView; // top-right menu / profile / downloads / history layer (trusted)
-let findView; // find-in-page bar (trusted), shown on Ctrl+F
-let ctxView; // right-click context menu layer (trusted)
-let permView; // permission prompt bubble (trusted)
-let interstitialView; // HTTPS-only failure interstitial (trusted, content area)
-let settingsView; // full-page settings surface (trusted, content area)
-let settingsOpen = false;
-let popKind = null; // which popover is open, or null
-let findOpen = false;
-let findText = '';
-let ctxOpen = false;
-let ctxParams = null; // params from the last 'context-menu' event
-let permActive = null; // current { origin, permission, callback }
-const permQueue = []; // pending permission requests
-let httpsOnly = true; // mirrors settings.httpsOnly
-const upgraded = new Map(); // upgraded https url -> original http url
+// S.win + per-window views/state live on the window context (S.win, S.chromeView,
+// createBrowserWindow) and are referenced as S.chromeView, S.settingsOpen, etc.
+let httpsOnly = true; // mirrors settings.httpsOnly (app-level, shared)
+const upgraded = new Map(); // upgraded https url -> original http url (shared)
 
 // Popover sizes (the view is sized to the card).
 const POP_SIZES = {
@@ -117,35 +100,74 @@ const POP_SIZES = {
   enginepick: { w: 216, h: 344 },
   tabmenu: { w: 188, h: 172 },
 };
-let tabMenuTarget = null; // tab id the tab context menu acts on
-let tabMenuPos = { x: 0, y: 0 };
 
 // Top-right cluster popovers anchor right; site-info anchors under the omnibox;
 // the first-run setup picker centers under the toolbar.
 function popoverPos(kind, s, width) {
-  if (kind === 'setup') return { x: Math.max(10, Math.round((width - s.w) / 2)), y: CHROME_HEIGHT };
+  if (kind === 'setup') return { x: Math.max(10, Math.round((width - s.w) / 2)), y: S.CHROME_HEIGHT };
   // The engine picker drops under its button at the left of the omnibox.
-  if (kind === 'enginepick') return { x: OMNIBOX_LEFT, y: CHROME_HEIGHT };
+  if (kind === 'enginepick') return { x: OMNIBOX_LEFT, y: S.CHROME_HEIGHT };
   // The tab context menu opens at the cursor (clamped to the window).
   if (kind === 'tabmenu') {
-    return { x: Math.max(6, Math.min(tabMenuPos.x, width - s.w - 6)), y: Math.max(CHROME_HEIGHT - 4, tabMenuPos.y) };
+    return { x: Math.max(6, Math.min(S.tabMenuPos.x, width - s.w - 6)), y: Math.max(S.CHROME_HEIGHT - 4, S.tabMenuPos.y) };
   }
   const x = kind === 'siteinfo' ? 12 : Math.max(0, width - s.w - 10);
-  return { x, y: CHROME_HEIGHT };
+  return { x, y: S.CHROME_HEIGHT };
 }
 // Approximate x of the omnibox's left edge (after home/back/forward/reload),
 // where the search-engine button sits. Tunable if the toolbar spacing changes.
 const OMNIBOX_LEFT = 150;
 
 // Tab model. Each tab owns a WebContentsView (untrusted web content). A tab
-// with `onHero: true` shows the shared heroView instead of its own page.
-let tabs = []; // { id, view, title, url, favicon, onHero, canGoBack, canGoForward, loading }
-let activeTabId = null;
-let tabSeq = 0;
-const closedStack = [];
+// with `onHero: true` shows the shared S.heroView instead of its own page.
+// Tab model { id, view, title, url, favicon, onHero, ... }. Per-window: lives on
+// the window context as S.tabs (with S.activeTabId / S.tabSeq / S.closedStack).
+
+// Multi-window registry. During the multi-window refactor each browser window is
+// represented by a context object W (see createBrowserWindow). Phase 1 still keeps
+// the single-window globals above as the source of truth for window 0; later steps
+// move that state onto W and thread it through the per-window functions.
+const windows = [];
+let focusedW = null;
+// S is the active window context: the W whose per-window state the per-window
+// functions read/write. Phase 1 has one window so S is always it; step 1.3 sets
+// S per IPC/event so windows become independent.
+let S = null;
+function focusedWindow() {
+  if (focusedW && windows.includes(focusedW)) return focusedW;
+  return windows.find((W) => W.win && !W.win.isDestroyed() && W.win.isFocused()) || windows[0] || null;
+}
+// Make W the active window context AND point the per-profile stores at its
+// profile, so history/passwords read and write the right profile's data.
+function useWindow(W) {
+  S = W;
+  if (W) {
+    store.setProfile(W.profileId);
+    vault.setProfile(W.profileId);
+  }
+}
+// Reflect a window's profile in its title and tell its chrome (for a badge/tint).
+function applyWindowProfile(W) {
+  if (!W || !W.win || W.win.isDestroyed()) return;
+  const p = profiles.getProfile(W.profileId);
+  const name = (p && p.name) || 'Personal';
+  try {
+    W.win.setTitle(W.profileId === 'default' ? 'Slash' : 'Slash (' + name + ')');
+  } catch {
+    /* ignore */
+  }
+  if (W.chromeView) {
+    W.chromeView.webContents.send('profile-window', {
+      id: W.profileId,
+      name,
+      color: (p && p.color) || '#f1cb53',
+      isDefault: W.profileId === 'default',
+    });
+  }
+}
 
 function activeTab() {
-  return tabs.find((t) => t.id === activeTabId) || null;
+  return S.tabs.find((t) => t.id === S.activeTabId) || null;
 }
 
 const ENGINES = {
@@ -313,7 +335,7 @@ function setBlocking(on) {
 function onRequestBlocked(request) {
   const id = request && request.tabId;
   if (!id) return;
-  const tab = tabs.find((t) => {
+  const tab = S.tabs.find((t) => {
     try {
       return t.view.webContents.id === id;
     } catch {
@@ -322,13 +344,13 @@ function onRequestBlocked(request) {
   });
   if (!tab) return;
   tab.blocked = (tab.blocked || 0) + 1;
-  if (tab.id === activeTabId) sendBlocked();
+  if (tab.id === S.activeTabId) sendBlocked();
 }
 
 function sendBlocked() {
-  if (!chromeView) return;
+  if (!S.chromeView) return;
   const at = activeTab();
-  chromeView.webContents.send('blocked', {
+  S.chromeView.webContents.send('blocked', {
     count: at ? at.blocked || 0 : 0,
     enabled: readSettings().blockAds,
   });
@@ -350,8 +372,8 @@ function setupPermissions(ses = session.defaultSession) {
   });
 }
 
-// --- Private tabs ---
-// Private tabs share one in-memory session (no `persist:` prefix), so they keep
+// --- Private S.tabs ---
+// Private S.tabs share one in-memory session (no `persist:` prefix), so they keep
 // no cookies/cache/storage on disk and record no history. Closing the last one
 // wipes the session. The same hardening (permissions, DoH, blocker) is applied.
 const PRIVATE_PARTITION = 'slash-private';
@@ -371,8 +393,99 @@ function ensurePrivateSession() {
   }
   privateReady = true;
 }
+// Per-profile sessions. The default profile keeps session.defaultSession (so its
+// existing logins/cookies survive); every other profile gets its own persistent
+// partition, isolated cookies/storage/cache. Each profile session is hardened
+// (permissions, DoH, ad/tracker blocking) the first time it is used.
+const profileReady = new Set();
+function profilePartition(profileId) {
+  return profileId === 'default' ? null : 'persist:profile-' + profileId;
+}
+function profileSession(profileId) {
+  const part = profilePartition(profileId);
+  return part ? session.fromPartition(part) : session.defaultSession;
+}
+function ensureProfileSession(profileId) {
+  if (profileId === 'default' || profileReady.has(profileId)) return;
+  const ps = profileSession(profileId);
+  try {
+    setupPermissions(ps);
+    applyDoh(ps);
+    if (readSettings().blockAds && blocker) blocker.enableBlockingInSession(ps);
+  } catch {
+    /* best effort */
+  }
+  profileReady.add(profileId);
+}
+
+// One Chrome-extension API layer per profile session (content blockers, the Web
+// Store, etc.). Created on first use; tabs of that profile register with it so
+// chrome.tabs works. Extensions installed in one profile don't appear in others.
+function ensureExtensions(profileId) {
+  if (extByProfile.has(profileId)) return extByProfile.get(profileId);
+  const ses = profileSession(profileId);
+  const winOf = () =>
+    windows.find((x) => x.profileId === profileId && x.win && !x.win.isDestroyed()) || focusedWindow();
+  const tabOf = (wc) => {
+    for (const W of windows) {
+      if (W.profileId !== profileId) continue;
+      const t = W.tabs.find((x) => x.view && x.view.webContents === wc);
+      if (t) return { W, t };
+    }
+    return null;
+  };
+  let inst = null;
+  try {
+    ElectronChromeExtensions.handleCRXProtocol(ses);
+    inst = new ElectronChromeExtensions({
+      license: 'GPL-3.0',
+      session: ses,
+      createTab: (details) => {
+        const W = winOf();
+        useWindow(W);
+        const id = createTab({ url: details.url, activate: details.active !== false });
+        const t = W.tabs.find((x) => x.id === id);
+        return Promise.resolve([t.view.webContents, W.win]);
+      },
+      selectTab: (wc) => {
+        const hit = tabOf(wc);
+        if (hit) {
+          useWindow(hit.W);
+          activateTab(hit.t.id);
+        }
+      },
+      removeTab: (wc) => {
+        const hit = tabOf(wc);
+        if (hit) {
+          useWindow(hit.W);
+          closeTab(hit.t.id);
+        }
+      },
+      createWindow: () => Promise.resolve(createBrowserWindow({ profileId }).win),
+      removeWindow: (bw) => {
+        try {
+          if (bw && !bw.isDestroyed()) bw.destroy();
+        } catch {
+          /* ignore */
+        }
+      },
+    });
+  } catch {
+    inst = null;
+  }
+  extByProfile.set(profileId, inst);
+  // Load this profile's saved unpacked extensions and enable Web Store installs.
+  try {
+    loadSavedExtensions(profileId);
+    installChromeWebStore({ session: ses }).catch(() => {});
+  } catch {
+    /* best effort */
+  }
+  return inst;
+}
+
 function hasPrivateTabs() {
-  return tabs.some((t) => t.private);
+  return S.tabs.some((t) => t.private);
 }
 function clearPrivateSession() {
   try {
@@ -385,36 +498,36 @@ function clearPrivateSession() {
 }
 
 function enqueuePermission(req) {
-  permQueue.push(req);
-  if (!permActive) showNextPermission();
+  S.permQueue.push(req);
+  if (!S.permActive) showNextPermission();
 }
 
 function showNextPermission() {
-  permActive = permQueue.shift() || null;
-  if (!permActive) {
-    if (permView) permView.setVisible(false);
+  S.permActive = S.permQueue.shift() || null;
+  if (!S.permActive) {
+    if (S.permView) S.permView.setVisible(false);
     return;
   }
-  if (!permView) return;
-  const { width } = win.getContentBounds();
-  permView.setBounds({ x: 12, y: CHROME_HEIGHT + 6, width: Math.min(PERM_W, width - 24), height: PERM_H });
-  permView.setVisible(true);
-  win.contentView.removeChildView(permView);
-  win.contentView.addChildView(permView); // topmost
-  permView.webContents.send('perm:show', { origin: permActive.origin, action: permActive.label });
-  permView.webContents.focus();
+  if (!S.permView) return;
+  const { width } = S.win.getContentBounds();
+  S.permView.setBounds({ x: 12, y: S.CHROME_HEIGHT + 6, width: Math.min(PERM_W, width - 24), height: PERM_H });
+  S.permView.setVisible(true);
+  S.win.contentView.removeChildView(S.permView);
+  S.win.contentView.addChildView(S.permView); // topmost
+  S.permView.webContents.send('perm:show', { origin: S.permActive.origin, action: S.permActive.label });
+  S.permView.webContents.focus();
 }
 
 function decidePermission(allow) {
-  if (!permActive) return;
-  const { origin, permission, callback } = permActive;
+  if (!S.permActive) return;
+  const { origin, permission, callback } = S.permActive;
   store.setPermission(origin, permission, allow ? 'allow' : 'block');
   try {
     callback(!!allow);
   } catch {
     /* request already gone */
   }
-  permActive = null;
+  S.permActive = null;
   showNextPermission();
 }
 
@@ -448,7 +561,7 @@ const SYSTEM =
   'bookmark pages, and add sites to the start page. Use them when they help. ' +
   'Do not use file, terminal, or code-editing tools.';
 
-let aiOpen = false;
+// S.aiOpen now lives on the window context S.
 
 function normalizeInput(input) {
   const text = (input || '').trim();
@@ -494,15 +607,15 @@ async function applyAccent(view) {
   }
 }
 function broadcastAccent() {
-  for (const v of [chromeView, heroView, interstitialView, settingsView, aiPageView, aiView, popoverView, findView, ctxView, permView]) applyAccent(v);
+  for (const v of [S.chromeView, S.heroView, S.interstitialView, S.settingsView, S.aiPageView, S.aiView, S.popoverView, S.findView, S.ctxView, S.permView]) applyAccent(v);
 }
 
 // --- Downloads ---
 const downloads = [];
 let dlSeq = 0;
 function sendDownloads() {
-  if (!popoverView) return;
-  popoverView.webContents.send(
+  if (!S.popoverView) return;
+  S.popoverView.webContents.send(
     'downloads',
     downloads.map((d) => ({ id: d.id, name: d.name, state: d.state, received: d.received, total: d.total })),
   );
@@ -537,14 +650,14 @@ function securityOf(at) {
 
 // --- State to the chrome UI ---
 function sendState() {
-  if (!chromeView) return;
+  if (!S.chromeView) return;
   const at = activeTab();
   const onHero = !!(at && at.onHero);
   const onAIPage = !!(at && at.onAIPage);
   const realPage = at && !onHero && !onAIPage;
-  chromeView.webContents.send('state', {
+  S.chromeView.webContents.send('state', {
     mode: onAIPage ? 'aipage' : onHero ? 'hero' : 'page',
-    aiOpen,
+    aiOpen: S.aiOpen,
     url: onAIPage ? 'slash://ai' : realPage ? at.view.webContents.getURL() : '',
     title: onAIPage ? 'Slash AI' : at ? at.title : 'Slash',
     canGoBack: at ? at.canGoBack : false,
@@ -556,14 +669,14 @@ function sendState() {
 }
 
 function sendTabs() {
-  if (!chromeView) return;
-  chromeView.webContents.send(
+  if (!S.chromeView) return;
+  S.chromeView.webContents.send(
     'tabs',
-    tabs.map((t) => ({
+    S.tabs.map((t) => ({
       id: t.id,
       title: t.onHero ? 'New tab' : t.title || t.url || 'Loading',
       favicon: t.onHero ? null : t.favicon,
-      active: t.id === activeTabId,
+      active: t.id === S.activeTabId,
       loading: t.loading,
       suspended: !!t.suspended,
       pinned: !!t.pinned,
@@ -573,12 +686,12 @@ function sendTabs() {
   scheduleSessionSave(); // persist the open-tab set for next launch
 }
 
-// Pinned tabs sort to the front; a stable sort preserves order within groups.
+// Pinned S.tabs sort to the front; a stable sort preserves order within groups.
 function reorderPinned() {
-  tabs.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  S.tabs.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
 }
 function setPinned(id, pinned) {
-  const tab = tabs.find((t) => t.id === id);
+  const tab = S.tabs.find((t) => t.id === id);
   if (!tab || tab.pinned === pinned) return;
   tab.pinned = pinned;
   reorderPinned();
@@ -586,34 +699,34 @@ function setPinned(id, pinned) {
 }
 function closeOtherTabs(id) {
   // Close every non-pinned tab except the target.
-  for (const t of tabs.slice()) {
+  for (const t of S.tabs.slice()) {
     if (t.id !== id && !t.pinned) closeTab(t.id);
   }
 }
 
 // --- Layout / visibility ---
 function layout() {
-  const { width, height } = win.getContentBounds();
-  chromeView.setBounds({ x: 0, y: 0, width, height: CHROME_HEIGHT });
-  const top = CHROME_HEIGHT;
-  const ch = Math.max(0, height - CHROME_HEIGHT);
-  const aiW = aiOpen ? Math.min(AI_WIDTH, Math.floor(width * 0.5)) : 0;
+  const { width, height } = S.win.getContentBounds();
+  S.chromeView.setBounds({ x: 0, y: 0, width, height: S.CHROME_HEIGHT });
+  const top = S.CHROME_HEIGHT;
+  const ch = Math.max(0, height - S.CHROME_HEIGHT);
+  const aiW = S.aiOpen ? Math.min(AI_WIDTH, Math.floor(width * 0.5)) : 0;
   const mainW = Math.max(0, width - aiW);
-  heroView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  if (interstitialView) interstitialView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  if (settingsView) settingsView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  if (aiPageView) aiPageView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  for (const t of tabs) if (t.view) t.view.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
-  if (popKind && popoverView) {
-    const s = POP_SIZES[popKind];
-    const { x, y } = popoverPos(popKind, s, width);
-    popoverView.setBounds({ x, y, width: s.w, height: s.h });
+  S.heroView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  if (S.interstitialView) S.interstitialView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  if (S.settingsView) S.settingsView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  if (S.aiPageView) S.aiPageView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  for (const t of S.tabs) if (t.view) t.view.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  S.aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
+  if (S.popKind && S.popoverView) {
+    const s = POP_SIZES[S.popKind];
+    const { x, y } = popoverPos(S.popKind, s, width);
+    S.popoverView.setBounds({ x, y, width: s.w, height: s.h });
   }
-  if (findOpen && findView) {
-    findView.setBounds({
+  if (S.findOpen && S.findView) {
+    S.findView.setBounds({
       x: Math.max(0, width - aiW - FIND_W - 16),
-      y: CHROME_HEIGHT + 8,
+      y: S.CHROME_HEIGHT + 8,
       width: FIND_W,
       height: FIND_HEIGHT,
     });
@@ -622,10 +735,10 @@ function layout() {
 
 function updateContentVisibility() {
   const at = activeTab();
-  if (settingsView) settingsView.setVisible(settingsOpen);
-  const onInt = !settingsOpen && !!(at && at.failedHttp);
-  if (interstitialView) {
-    interstitialView.setVisible(onInt);
+  if (S.settingsView) S.settingsView.setVisible(S.settingsOpen);
+  const onInt = !S.settingsOpen && !!(at && at.failedHttp);
+  if (S.interstitialView) {
+    S.interstitialView.setVisible(onInt);
     if (onInt) {
       let host = '';
       try {
@@ -633,14 +746,14 @@ function updateContentVisibility() {
       } catch {
         /* keep blank */
       }
-      interstitialView.webContents.send('interstitial', { url: at.failedHttp, host });
+      S.interstitialView.webContents.send('interstitial', { url: at.failedHttp, host });
     }
   }
-  const onAIPage = !settingsOpen && !onInt && !!(at && at.onAIPage);
-  if (aiPageView) aiPageView.setVisible(onAIPage);
-  const onContent = settingsOpen || onInt || onAIPage;
-  heroView.setVisible(!onContent && !!at && at.onHero);
-  for (const t of tabs) if (t.view) t.view.setVisible(!onContent && !!at && t.id === at.id && !at.onHero);
+  const onAIPage = !S.settingsOpen && !onInt && !!(at && at.onAIPage);
+  if (S.aiPageView) S.aiPageView.setVisible(onAIPage);
+  const onContent = S.settingsOpen || onInt || onAIPage;
+  S.heroView.setVisible(!onContent && !!at && at.onHero);
+  for (const t of S.tabs) if (t.view) t.view.setVisible(!onContent && !!at && t.id === at.id && !at.onHero);
 }
 
 function goAIPage(opts = {}) {
@@ -648,48 +761,48 @@ function goAIPage(opts = {}) {
   if (!at) return;
   at.onAIPage = true;
   at.onHero = false;
-  settingsOpen = false;
+  S.settingsOpen = false;
   updateContentVisibility();
   sendState();
   sendTabs();
-  if (opts.prompt) aiPageView.webContents.send('ai:prompt', opts.prompt);
-  if (opts.load) aiPageView.webContents.send('ai:load', opts.load);
-  aiPageView.webContents.focus();
+  if (opts.prompt) S.aiPageView.webContents.send('ai:prompt', opts.prompt);
+  if (opts.load) S.aiPageView.webContents.send('ai:load', opts.load);
+  S.aiPageView.webContents.focus();
 }
 
 function openSettingsPage(section) {
-  settingsOpen = true;
-  if (settingsView) settingsView.webContents.send('settings:show', typeof section === 'string' ? section : null);
+  S.settingsOpen = true;
+  if (S.settingsView) S.settingsView.webContents.send('settings:show', typeof section === 'string' ? section : null);
   updateContentVisibility();
-  if (settingsView) settingsView.webContents.focus();
+  if (S.settingsView) S.settingsView.webContents.focus();
 }
 
 function closeSettingsPage() {
-  if (!settingsOpen) return;
-  settingsOpen = false;
+  if (!S.settingsOpen) return;
+  S.settingsOpen = false;
   updateContentVisibility();
 }
 
 // Keep the toolbar and AI panel above all tab content. Remove-then-add so a
 // re-stack can never duplicate a child view.
 function raiseChrome() {
-  for (const v of [aiView, chromeView, popoverView, findView, ctxView, permView]) {
+  for (const v of [S.aiView, S.chromeView, S.popoverView, S.findView, S.ctxView, S.permView]) {
     if (!v) continue;
-    win.contentView.removeChildView(v);
-    win.contentView.addChildView(v);
+    S.win.contentView.removeChildView(v);
+    S.win.contentView.addChildView(v);
   }
 }
 
 // --- Find-in-page ---
 function showFind() {
-  findOpen = true;
+  S.findOpen = true;
   layout();
-  findView.setVisible(true);
-  findView.webContents.focus();
+  S.findView.setVisible(true);
+  S.findView.webContents.focus();
 }
 function hideFind() {
-  findOpen = false;
-  if (findView) findView.setVisible(false);
+  S.findOpen = false;
+  if (S.findView) S.findView.setVisible(false);
   const at = activeTab();
   if (at) at.view.webContents.stopFindInPage('clearSelection');
 }
@@ -747,33 +860,33 @@ function buildContextMenu(p) {
 }
 
 function showContext(params) {
-  if (!ctxView) return;
-  ctxParams = params;
+  if (!S.ctxView) return;
+  S.ctxParams = params;
   const items = buildContextMenu(params);
   let h = CTX_FRAME;
   for (const it of items) h += it.sep ? CTX_SEP : CTX_ROW;
-  const { width, height } = win.getContentBounds();
-  // params.x/y are relative to the page view, which sits at (0, CHROME_HEIGHT).
+  const { width, height } = S.win.getContentBounds();
+  // params.x/y are relative to the page view, which sits at (0, S.CHROME_HEIGHT).
   let x = Math.max(4, Math.min(params.x, width - CTX_WIDTH - 4));
-  let y = Math.max(CHROME_HEIGHT + 4, Math.min(params.y + CHROME_HEIGHT, height - h - 4));
-  ctxView.setBounds({ x, y, width: CTX_WIDTH, height: h });
-  ctxView.setVisible(true);
-  win.contentView.removeChildView(ctxView);
-  win.contentView.addChildView(ctxView); // keep it topmost
-  ctxView.webContents.send('ctx:items', items);
-  ctxView.webContents.focus();
-  ctxOpen = true;
+  let y = Math.max(S.CHROME_HEIGHT + 4, Math.min(params.y + S.CHROME_HEIGHT, height - h - 4));
+  S.ctxView.setBounds({ x, y, width: CTX_WIDTH, height: h });
+  S.ctxView.setVisible(true);
+  S.win.contentView.removeChildView(S.ctxView);
+  S.win.contentView.addChildView(S.ctxView); // keep it topmost
+  S.ctxView.webContents.send('ctx:items', items);
+  S.ctxView.webContents.focus();
+  S.ctxOpen = true;
 }
 
 function hideContext() {
-  if (!ctxView || !ctxOpen) return;
-  ctxView.setVisible(false);
-  ctxOpen = false;
-  ctxParams = null;
+  if (!S.ctxView || !S.ctxOpen) return;
+  S.ctxView.setVisible(false);
+  S.ctxOpen = false;
+  S.ctxParams = null;
 }
 
 function runCtxAction(id) {
-  const p = ctxParams || {};
+  const p = S.ctxParams || {};
   const wc = activePageWc();
   switch (id) {
     case 'back':
@@ -836,7 +949,7 @@ function runCtxAction(id) {
 
 // --- Bookmarks helpers ---
 function sendBookmarks() {
-  if (chromeView) chromeView.webContents.send('bookmarks', store.getBookmarks());
+  if (S.chromeView) S.chromeView.webContents.send('bookmarks', store.getBookmarks());
 }
 
 // --- Top-right popovers ---
@@ -851,7 +964,7 @@ function sendSiteinfo() {
   }
   const origin = originOf(url);
   const perms = origin ? store.getSitePermissions(origin) : {};
-  popoverView.webContents.send('siteinfo', {
+  S.popoverView.webContents.send('siteinfo', {
     secure: securityOf(at),
     host,
     origin: origin || '',
@@ -862,63 +975,63 @@ function sendSiteinfo() {
 function showPopover(kind) {
   const s = POP_SIZES[kind];
   if (!s) return;
-  const { width } = win.getContentBounds();
+  const { width } = S.win.getContentBounds();
   const { x, y } = popoverPos(kind, s, width);
-  popoverView.setBounds({ x, y, width: s.w, height: s.h });
-  popoverView.setVisible(true);
-  popoverView.webContents.send('pop:show', kind);
+  S.popoverView.setBounds({ x, y, width: s.w, height: s.h });
+  S.popoverView.setVisible(true);
+  S.popoverView.webContents.send('pop:show', kind);
   sendDownloads();
-  if (kind === 'history') popoverView.webContents.send('history', store.getHistory().slice(0, 300));
+  if (kind === 'history') S.popoverView.webContents.send('history', store.getHistory().slice(0, 300));
   if (kind === 'siteinfo') sendSiteinfo();
   if (kind === 'shield') sendShield();
   if (kind === 'setup') sendSetup();
   if (kind === 'enginepick') {
-    popoverView.webContents.send('enginepick', { current: readSettings().searchEngine, list: allEngineMeta() });
+    S.popoverView.webContents.send('enginepick', { current: readSettings().searchEngine, list: allEngineMeta() });
   }
   if (kind === 'tabmenu') {
-    const t = tabs.find((x) => x.id === tabMenuTarget);
-    popoverView.webContents.send('tabmenu', { pinned: !!(t && t.pinned) });
+    const t = S.tabs.find((x) => x.id === S.tabMenuTarget);
+    S.popoverView.webContents.send('tabmenu', { pinned: !!(t && t.pinned) });
   }
-  popoverView.webContents.focus();
-  popKind = kind;
+  S.popoverView.webContents.focus();
+  S.popKind = kind;
 }
 
 // One default search engine, reflected in the omnibox button and the start page.
 function broadcastSearchEngine() {
   const cur = readSettings().searchEngine;
-  if (chromeView) chromeView.webContents.send('search-engine', cur);
-  if (heroView) heroView.webContents.send('search-engine', cur);
+  if (S.chromeView) S.chromeView.webContents.send('search-engine', cur);
+  if (S.heroView) S.heroView.webContents.send('search-engine', cur);
 }
 // The full engine set changed (custom engine added/removed): refresh the views
 // that hold a copy of the list so they can render new entries.
 function broadcastEngineList() {
   const list = allEngineMeta();
-  if (chromeView) chromeView.webContents.send('search-list', list);
-  if (heroView) heroView.webContents.send('search-list', list);
+  if (S.chromeView) S.chromeView.webContents.send('search-list', list);
+  if (S.heroView) S.heroView.webContents.send('search-list', list);
 }
 
 // First-run setup picker: current default-browser status + importable sources.
 function sendSetup() {
-  popoverView.webContents.send('setup:default', app.isDefaultProtocolClient('http'));
+  S.popoverView.webContents.send('setup:default', app.isDefaultProtocolClient('http'));
   migrateSourceList()
-    .then((list) => popoverView.webContents.send('setup:sources', list))
-    .catch(() => popoverView.webContents.send('setup:sources', []));
+    .then((list) => S.popoverView.webContents.send('setup:sources', list))
+    .catch(() => S.popoverView.webContents.send('setup:sources', []));
 }
 
 function sendShield() {
   const at = activeTab();
-  popoverView.webContents.send('shield', {
+  S.popoverView.webContents.send('shield', {
     count: at ? at.blocked || 0 : 0,
     enabled: readSettings().blockAds,
   });
 }
 function hidePopover() {
-  if (!popoverView) return;
-  popoverView.setVisible(false);
-  popKind = null;
+  if (!S.popoverView) return;
+  S.popoverView.setVisible(false);
+  S.popKind = null;
 }
 function togglePopover(kind) {
-  if (popKind === kind) hidePopover();
+  if (S.popKind === kind) hidePopover();
   else showPopover(kind);
 }
 
@@ -929,22 +1042,33 @@ function togglePopover(kind) {
 // autofill preload that fills saved logins and never exposes them.
 function attachTabView(tab) {
   const id = tab.id;
+  const myW = S; // the window this tab belongs to; async events re-select it
+  tab.W = myW;
   const webPreferences = { ...SECURE_PREFS, preload: path.join(__dirname, 'tab-preload.js') };
-  if (tab.private) webPreferences.partition = PRIVATE_PARTITION; // in-memory, no traces
+  if (tab.private) {
+    webPreferences.partition = PRIVATE_PARTITION; // in-memory, no traces
+  } else if (myW.profileId && myW.profileId !== 'default') {
+    ensureProfileSession(myW.profileId); // isolated cookies/logins per profile
+    webPreferences.partition = profilePartition(myW.profileId);
+  }
   const view = new WebContentsView({ webPreferences });
   tab.view = view;
   const wc = view.webContents;
-  // Track this tab for the Chrome-extension APIs (private tabs stay out).
-  if (extensions && !tab.private) {
-    try {
-      extensions.addTab(wc, win);
-    } catch {
-      /* ignore */
+  // Track this tab for its profile's Chrome-extension APIs (private tabs stay out).
+  if (!tab.private) {
+    const ext = extByProfile.get(myW.profileId);
+    if (ext) {
+      try {
+        ext.addTab(wc, myW.win);
+      } catch {
+        /* ignore */
+      }
     }
   }
 
   const refresh = () => {
     if (!wc || wc.isDestroyed()) return;
+    useWindow(myW); // events can fire for a background window; act on the tab's window
     tab.url = wc.getURL();
     const t = wc.getTitle();
     if (t) tab.title = t;
@@ -953,7 +1077,7 @@ function attachTabView(tab) {
     tab.canGoForward = nh ? nh.canGoForward() : false;
     tab.loading = wc.isLoading();
     if (tab.url) tab.onHero = false;
-    if (id === activeTabId) sendState();
+    if (id === S.activeTabId) sendState();
     sendTabs();
   };
   for (const ev of [
@@ -966,6 +1090,7 @@ function attachTabView(tab) {
     wc.on(ev, refresh);
   }
   wc.on('page-favicon-updated', (_e, favs) => {
+    useWindow(myW);
     tab.favicon = (favs && favs[0]) || null;
     // Cache the real favicon locally so the start page / bookmarks can show it
     // without calling a third-party favicon service.
@@ -973,7 +1098,7 @@ function attachTabView(tab) {
     sendTabs();
   });
   // History: record on real navigations, update the title when it resolves.
-  // Private tabs leave no history.
+  // Private S.tabs leave no history.
   wc.on('did-navigate', () => {
     upgraded.delete(wc.getURL());
     if (!tab.private) store.addHistory({ url: wc.getURL(), title: wc.getTitle() });
@@ -983,8 +1108,9 @@ function attachTabView(tab) {
   });
   // Find-in-page match counts for this tab.
   wc.on('found-in-page', (_e, result) => {
-    if (findView) {
-      findView.webContents.send('find:result', {
+    useWindow(myW);
+    if (S.findView) {
+      S.findView.webContents.send('find:result', {
         active: result.activeMatchOrdinal,
         total: result.matches,
       });
@@ -993,28 +1119,30 @@ function attachTabView(tab) {
   // HTTPS-only: a failed upgrade shows the interstitial; any fresh load clears it.
   wc.on('did-fail-load', (_e, errorCode, _desc, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // -3 = ERR_ABORTED
+    useWindow(myW);
     const httpUrl = upgraded.get(validatedURL);
     if (httpUrl) {
       upgraded.delete(validatedURL);
       tab.failedHttp = httpUrl;
       tab.onHero = false;
-      if (id === activeTabId) {
+      if (id === S.activeTabId) {
         updateContentVisibility();
         sendState();
       }
     }
   });
   wc.on('did-start-loading', () => {
+    useWindow(myW);
     tab.blocked = 0;
     // New page: forget any "add this site" offer until it re-declares one.
     tab.pendingEngine = null;
     tab.pendingEngineHref = null;
-    if (id === activeTabId) sendAddEngine();
+    if (id === S.activeTabId) sendAddEngine();
     if (tab.failedHttp) {
       tab.failedHttp = null;
-      if (id === activeTabId) updateContentVisibility();
+      if (id === S.activeTabId) updateContentVisibility();
     }
-    if (id === activeTabId) sendBlocked();
+    if (id === S.activeTabId) sendBlocked();
   });
   // HTTPS-only: upgrade http link navigations before they load.
   wc.on('will-navigate', (e, url) => {
@@ -1026,24 +1154,26 @@ function attachTabView(tab) {
   });
   // Right-click anywhere in the page opens our custom context menu.
   wc.on('context-menu', (_e, params) => {
+    useWindow(myW);
     hidePopover();
     showContext(params);
   });
   // Links that open a new window become new tabs (private stays private).
   wc.setWindowOpenHandler(({ url }) => {
+    useWindow(myW);
     createTab({ url, activate: true, private: tab.private });
     return { action: 'deny' };
   });
   attachShortcuts(wc);
 
-  win.contentView.addChildView(view);
+  S.win.contentView.addChildView(view);
   view.setVisible(false);
   raiseChrome();
   return view;
 }
 
 function createTab(opts = {}) {
-  const id = ++tabSeq;
+  const id = ++S.tabSeq;
   if (opts.private) ensurePrivateSession(); // harden the in-memory session first
   const tab = {
     id,
@@ -1060,11 +1190,11 @@ function createTab(opts = {}) {
     onAIPage: false, // showing the full-screen slash://ai page
     lastActive: Date.now(), // for idle-based suspension
     suspended: false, // renderer freed; url/title/favicon kept
-    pinned: false, // pinned tabs sit first, compact, and survive "close others"
+    pinned: false, // pinned S.tabs sit first, compact, and survive "close others"
     private: !!opts.private, // in-memory session, no history, no traces
   };
   attachTabView(tab);
-  tabs.push(tab);
+  S.tabs.push(tab);
 
   if (opts.url) {
     tab.onHero = false;
@@ -1077,18 +1207,19 @@ function createTab(opts = {}) {
 }
 
 function activateTab(id) {
-  const tab = tabs.find((t) => t.id === id);
+  const tab = S.tabs.find((t) => t.id === id);
   if (!tab) return;
   // Mark the tab we are leaving as idle-from-now.
-  const prev = tabs.find((t) => t.id === activeTabId);
+  const prev = S.tabs.find((t) => t.id === S.activeTabId);
   if (prev && prev.id !== id) prev.lastActive = Date.now();
   if (tab.suspended) wakeTab(tab); // bring a discarded tab back before showing it
   tab.lastActive = Date.now();
-  activeTabId = id;
-  settingsOpen = false;
-  if (extensions && tab.view) {
+  S.activeTabId = id;
+  S.settingsOpen = false;
+  const ext = extByProfile.get(S.profileId);
+  if (ext && tab.view) {
     try {
-      extensions.selectTab(tab.view.webContents);
+      ext.selectTab(tab.view.webContents);
     } catch {
       /* ignore */
     }
@@ -1107,9 +1238,9 @@ function activateTab(id) {
 const SUSPEND_MS = 15 * 60 * 1000;
 
 function suspendTab(tab) {
-  if (!tab || tab.suspended || !tab.view || tab.id === activeTabId || tab.onHero) return;
+  if (!tab || tab.suspended || !tab.view || tab.id === S.activeTabId || tab.onHero) return;
   tab.url = tab.view.webContents.getURL() || tab.url; // remember where it was
-  win.contentView.removeChildView(tab.view);
+  S.win.contentView.removeChildView(tab.view);
   try {
     tab.view.webContents.close();
   } catch {
@@ -1134,53 +1265,53 @@ function wakeTab(tab) {
 
 function maybeSuspendIdleTabs() {
   const now = Date.now();
-  for (const t of tabs) {
-    if (t.id === activeTabId || t.suspended || !t.view || t.onHero) continue;
+  for (const t of S.tabs) {
+    if (t.id === S.activeTabId || t.suspended || !t.view || t.onHero) continue;
     if (now - (t.lastActive || 0) > SUSPEND_MS) suspendTab(t);
   }
 }
 
 function closeTab(id) {
-  const idx = tabs.findIndex((t) => t.id === id);
+  const idx = S.tabs.findIndex((t) => t.id === id);
   if (idx < 0) return;
-  const tab = tabs[idx];
-  // Private tabs never go on the reopen stack (no traces).
-  if (tab.url && !tab.private) closedStack.push(tab.url);
+  const tab = S.tabs[idx];
+  // Private S.tabs never go on the reopen stack (no traces).
+  if (tab.url && !tab.private) S.closedStack.push(tab.url);
   if (tab.view) {
-    win.contentView.removeChildView(tab.view);
+    S.win.contentView.removeChildView(tab.view);
     try {
       tab.view.webContents.close();
     } catch {
       /* already gone */
     }
   }
-  tabs.splice(idx, 1);
+  S.tabs.splice(idx, 1);
   // Wipe the private session once the last private tab is gone.
   if (tab.private && !hasPrivateTabs()) clearPrivateSession();
 
-  if (activeTabId === id) {
-    const next = tabs[idx] || tabs[idx - 1];
+  if (S.activeTabId === id) {
+    const next = S.tabs[idx] || S.tabs[idx - 1];
     if (next) activateTab(next.id);
-    else createTab(); // never leave zero tabs
+    else createTab(); // never leave zero S.tabs
   } else {
     sendTabs();
   }
 }
 
 function reopenClosed() {
-  const url = closedStack.pop();
+  const url = S.closedStack.pop();
   if (url) createTab({ url, activate: true });
 }
 
 function cycleTab(dir) {
-  if (tabs.length < 2) return;
-  const i = tabs.findIndex((t) => t.id === activeTabId);
-  const next = tabs[(i + dir + tabs.length) % tabs.length];
+  if (S.tabs.length < 2) return;
+  const i = S.tabs.findIndex((t) => t.id === S.activeTabId);
+  const next = S.tabs[(i + dir + S.tabs.length) % S.tabs.length];
   activateTab(next.id);
 }
 
 function jumpTab(n) {
-  const target = n === 9 ? tabs[tabs.length - 1] : tabs[n - 1];
+  const target = n === 9 ? S.tabs[S.tabs.length - 1] : S.tabs[n - 1];
   if (target) activateTab(target.id);
 }
 
@@ -1189,7 +1320,7 @@ function goHome() {
   if (!at) return;
   at.onHero = true;
   at.onAIPage = false;
-  settingsOpen = false;
+  S.settingsOpen = false;
   updateContentVisibility();
   sendState();
   sendTabs();
@@ -1197,10 +1328,10 @@ function goHome() {
 
 // --- AI panel ---
 function toggleAI(force) {
-  aiOpen = typeof force === 'boolean' ? force : !aiOpen;
-  aiView.setVisible(aiOpen);
+  S.aiOpen = typeof force === 'boolean' ? force : !S.aiOpen;
+  S.aiView.setVisible(S.aiOpen);
   layout();
-  if (aiOpen) aiView.webContents.focus();
+  if (S.aiOpen) S.aiView.webContents.focus();
   sendState();
 }
 
@@ -1215,8 +1346,9 @@ function attachShortcuts(wc) {
 
     if (key === 'j') return (toggleAI(), stop());
     if (key === 't' && !input.shift) return (createTab(), stop());
+    if (key === 'n' && !input.shift) return (createBrowserWindow(), stop());
     if (key === 'n' && input.shift) return (createTab({ private: true, activate: true }), stop());
-    if (key === 'w') return (activeTabId && closeTab(activeTabId), stop());
+    if (key === 'w') return (S.activeTabId && closeTab(S.activeTabId), stop());
     if (key === 't' && input.shift) return (reopenClosed(), stop());
     if (key === 'tab') return (cycleTab(input.shift ? -1 : 1), stop());
     if (/^[1-9]$/.test(input.key)) return (jumpTab(parseInt(input.key, 10)), stop());
@@ -1233,15 +1365,41 @@ function attachShortcuts(wc) {
       return stop();
     }
     if (key === 'l') {
-      chromeView.webContents.send('focus-omnibox');
-      chromeView.webContents.focus();
+      S.chromeView.webContents.send('focus-omnibox');
+      S.chromeView.webContents.focus();
       return stop();
     }
   });
 }
 
-function createWindow() {
-  win = new BaseWindow({
+function createBrowserWindow(opts = {}) {
+  // Per-window state lives on W; S points at the window currently being operated
+  // on. Views (S.chromeView etc.) are assigned below. S.win/S.tabs are still module
+  // globals in this batch and move onto W in the next.
+  const W = {};
+  W.profileId = opts.profileId || 'default';
+  windows.push(W);
+  focusedW = W;
+  useWindow(W);
+  W.tabs = [];
+  W.activeTabId = null;
+  W.tabSeq = 0;
+  W.closedStack = [];
+  W.settingsOpen = false;
+  W.popKind = null;
+  W.findOpen = false;
+  W.findText = '';
+  W.ctxOpen = false;
+  W.ctxParams = null;
+  W.permActive = null;
+  W.permQueue = [];
+  W.aiOpen = false;
+  W.infobarOpen = false;
+  W.CHROME_HEIGHT = BASE_CHROME;
+  W.tabMenuTarget = null;
+  W.tabMenuPos = { x: 0, y: 0 };
+
+  S.win = new BaseWindow({
     width: 1280,
     height: 860,
     title: 'Slash',
@@ -1249,109 +1407,86 @@ function createWindow() {
     icon: path.join(__dirname, 'icon.png'),
   });
 
-  // Chrome-extension API support (content blockers, etc.). Tabs are registered
-  // with it in attachTabView/activateTab so chrome.tabs works.
-  try {
-    ElectronChromeExtensions.handleCRXProtocol(session.defaultSession);
-    extensions = new ElectronChromeExtensions({
-      license: 'GPL-3.0',
-      session: session.defaultSession,
-      createTab: (details) => {
-        const id = createTab({ url: details.url, activate: details.active !== false });
-        const t = tabs.find((x) => x.id === id);
-        return Promise.resolve([t.view.webContents, win]);
-      },
-      selectTab: (wc) => {
-        const t = tabs.find((x) => x.view && x.view.webContents === wc);
-        if (t) activateTab(t.id);
-      },
-      removeTab: (wc) => {
-        const t = tabs.find((x) => x.view && x.view.webContents === wc);
-        if (t) closeTab(t.id);
-      },
-      createWindow: () => Promise.resolve(win), // single window: reuse it
-      removeWindow: () => {},
-    });
-  } catch {
-    extensions = null;
-  }
+  // Chrome-extension API support for this window's profile (created once per
+  // profile; many windows of a profile share it).
+  ensureExtensions(W.profileId);
 
-  heroView = new WebContentsView({
+  S.heroView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'hero-preload.js') },
   });
-  win.contentView.addChildView(heroView);
-  heroView.webContents.loadFile(path.join(__dirname, 'hero.html'));
-  heroView.setVisible(false);
+  S.win.contentView.addChildView(S.heroView);
+  S.heroView.webContents.loadFile(path.join(__dirname, 'hero.html'));
+  S.heroView.setVisible(false);
 
-  interstitialView = new WebContentsView({
+  S.interstitialView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'interstitial-preload.js') },
   });
-  win.contentView.addChildView(interstitialView);
-  interstitialView.webContents.loadFile(path.join(__dirname, 'interstitial.html'));
-  interstitialView.setVisible(false);
+  S.win.contentView.addChildView(S.interstitialView);
+  S.interstitialView.webContents.loadFile(path.join(__dirname, 'interstitial.html'));
+  S.interstitialView.setVisible(false);
 
-  settingsView = new WebContentsView({
+  S.settingsView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'settings-preload.js') },
   });
-  win.contentView.addChildView(settingsView);
-  settingsView.webContents.loadFile(path.join(__dirname, 'settings.html'));
-  settingsView.setVisible(false);
+  S.win.contentView.addChildView(S.settingsView);
+  S.settingsView.webContents.loadFile(path.join(__dirname, 'settings.html'));
+  S.settingsView.setVisible(false);
 
-  aiPageView = new WebContentsView({
+  S.aiPageView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
   });
-  win.contentView.addChildView(aiPageView);
-  aiPageView.webContents.loadFile(path.join(__dirname, 'ai-page.html'));
-  aiPageView.setVisible(false);
+  S.win.contentView.addChildView(S.aiPageView);
+  S.aiPageView.webContents.loadFile(path.join(__dirname, 'ai-page.html'));
+  S.aiPageView.setVisible(false);
 
-  aiView = new WebContentsView({
+  S.aiView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
   });
-  win.contentView.addChildView(aiView);
-  aiView.webContents.loadFile(path.join(__dirname, 'ai.html'));
-  aiView.setVisible(false);
+  S.win.contentView.addChildView(S.aiView);
+  S.aiView.webContents.loadFile(path.join(__dirname, 'ai.html'));
+  S.aiView.setVisible(false);
 
-  chromeView = new WebContentsView({
+  S.chromeView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'preload.js') },
   });
-  win.contentView.addChildView(chromeView);
-  chromeView.webContents.loadFile(path.join(__dirname, 'index.html'));
+  S.win.contentView.addChildView(S.chromeView);
+  S.chromeView.webContents.loadFile(path.join(__dirname, 'index.html'));
 
-  popoverView = new WebContentsView({
+  S.popoverView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'overlay-preload.js') },
   });
-  win.contentView.addChildView(popoverView);
-  popoverView.webContents.loadFile(path.join(__dirname, 'overlay.html'));
-  popoverView.setVisible(false);
+  S.win.contentView.addChildView(S.popoverView);
+  S.popoverView.webContents.loadFile(path.join(__dirname, 'overlay.html'));
+  S.popoverView.setVisible(false);
   // Close on click-away, except the first-run setup picker: opening Windows
   // Default Apps steals focus, and we don't want that to abort the import step.
-  popoverView.webContents.on('blur', () => {
-    if (popKind !== 'setup') hidePopover();
+  S.popoverView.webContents.on('blur', () => {
+    if (S.popKind !== 'setup') hidePopover();
   });
 
-  findView = new WebContentsView({
+  S.findView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'find-preload.js') },
   });
-  win.contentView.addChildView(findView);
-  findView.webContents.loadFile(path.join(__dirname, 'find.html'));
-  findView.setVisible(false);
+  S.win.contentView.addChildView(S.findView);
+  S.findView.webContents.loadFile(path.join(__dirname, 'find.html'));
+  S.findView.setVisible(false);
 
-  ctxView = new WebContentsView({
+  S.ctxView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'context-preload.js') },
   });
-  win.contentView.addChildView(ctxView);
-  ctxView.webContents.loadFile(path.join(__dirname, 'context.html'));
-  ctxView.setVisible(false);
-  ctxView.webContents.on('blur', hideContext); // close on click-away
+  S.win.contentView.addChildView(S.ctxView);
+  S.ctxView.webContents.loadFile(path.join(__dirname, 'context.html'));
+  S.ctxView.setVisible(false);
+  S.ctxView.webContents.on('blur', hideContext); // close on click-away
 
-  permView = new WebContentsView({
+  S.permView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'permission-preload.js') },
   });
-  win.contentView.addChildView(permView);
-  permView.webContents.loadFile(path.join(__dirname, 'permission.html'));
-  permView.setVisible(false);
+  S.win.contentView.addChildView(S.permView);
+  S.permView.webContents.loadFile(path.join(__dirname, 'permission.html'));
+  S.permView.setVisible(false);
 
-  for (const v of [heroView, interstitialView, settingsView, aiPageView, aiView, chromeView, popoverView, findView, ctxView, permView]) {
+  for (const v of [S.heroView, S.interstitialView, S.settingsView, S.aiPageView, S.aiView, S.chromeView, S.popoverView, S.findView, S.ctxView, S.permView]) {
     attachShortcuts(v.webContents);
     v.webContents.on('did-finish-load', () => applyAccent(v));
     // Trusted chrome must never navigate itself or spawn windows. Real web
@@ -1360,31 +1495,55 @@ function createWindow() {
     v.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   }
 
-  win.on('resize', () => {
+  S.win.on('focus', () => {
+    focusedW = W;
+    useWindow(W);
+  });
+
+  S.win.on('closed', () => {
+    const i = windows.indexOf(W);
+    if (i !== -1) windows.splice(i, 1);
+    for (const t of W.tabs) {
+      try {
+        if (t.view && !t.view.webContents.isDestroyed()) t.view.webContents.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
+    if (focusedW === W) focusedW = windows[0] || null;
+    if (S === W) useWindow(focusedW);
+  });
+
+  S.win.on('resize', () => {
+    useWindow(W);
     hideContext();
     layout();
   });
   layout();
 
-  // Bring back last session's tabs (background tabs come back suspended/lazy).
-  restoreSession();
-  // If launched as the default browser with a URL (e.g. clicked link), open it.
-  const startUrl = urlFromArgv(process.argv);
-  if (startUrl) createTab({ url: startUrl, activate: true });
-  if (!tabs.length) createTab(); // nothing restored and no link: a fresh hero tab
+  // A restored window gets its saved tabs (background tabs come back suspended/
+  // lazy); a window opened later (Ctrl+N) starts with a fresh hero tab.
+  if (opts.session) restoreSessionInto(opts.session);
+  if (!S.tabs.length) createTab(); // nothing restored / fresh window: a hero tab
+  applyWindowProfile(W); // window title (+ chrome badge) for its profile
+  return W;
 }
 
-// --- Session restore: reopen the tabs you had open last time ---
+// --- Session restore: reopen the S.tabs you had open last time ---
 function sessionPath() {
   return path.join(app.getPath('userData'), 'slash-session.json');
 }
-function saveSession() {
-  // Private tabs are ephemeral and never restored.
-  const open = tabs.filter((t) => !t.onHero && !t.private && (t.url || t.suspended));
+// One window's restorable tabs (private tabs are ephemeral and never saved).
+function sessionForWindow(W) {
+  const open = W.tabs.filter((t) => !t.onHero && !t.private && (t.url || t.suspended));
   const list = open.map((t) => ({ url: t.url, title: t.title, pinned: !!t.pinned }));
-  const active = Math.max(0, open.findIndex((t) => t.id === activeTabId));
+  const active = Math.max(0, open.findIndex((t) => t.id === W.activeTabId));
+  return { profileId: W.profileId || 'default', tabs: list, active };
+}
+function saveSession() {
   try {
-    fs.writeFileSync(sessionPath(), JSON.stringify({ tabs: list, active }), 'utf8');
+    const list = windows.map(sessionForWindow).filter((w) => w.tabs.length);
+    fs.writeFileSync(sessionPath(), JSON.stringify({ windows: list }), 'utf8');
   } catch {
     /* best effort */
   }
@@ -1397,19 +1556,15 @@ function scheduleSessionSave() {
     saveSession();
   }, 1500);
 }
-function restoreSession() {
-  let sess;
-  try {
-    sess = JSON.parse(fs.readFileSync(sessionPath(), 'utf8'));
-  } catch {
-    return;
-  }
+// Restore one window's tabs into the current window (S). Operates on S because
+// it runs inside createBrowserWindow for the window being built.
+function restoreSessionInto(sess) {
   if (!sess || !Array.isArray(sess.tabs) || !sess.tabs.length) return;
   for (const t of sess.tabs) {
     if (!t || !t.url || !/^https?:\/\//i.test(t.url)) continue;
     // Create as a suspended (lazy) tab; it loads when activated/clicked.
-    const id = ++tabSeq;
-    tabs.push({
+    const id = ++S.tabSeq;
+    S.tabs.push({
       id,
       view: null,
       title: t.title || t.url,
@@ -1427,10 +1582,36 @@ function restoreSession() {
       pinned: !!t.pinned,
     });
   }
-  if (!tabs.length) return;
-  const idx = Math.min(Math.max(0, sess.active | 0), tabs.length - 1);
-  activateTab(tabs[idx].id); // wakes + loads just the active one
+  if (!S.tabs.length) return;
+  const idx = Math.min(Math.max(0, sess.active | 0), S.tabs.length - 1);
+  activateTab(S.tabs[idx].id); // wakes + loads just the active one
   layout();
+}
+
+// At startup, recreate every window that was open last time (each with its own
+// tabs). Back-compatible with the old single-window { tabs, active } shape.
+function restoreWindows() {
+  let saved = null;
+  try {
+    saved = JSON.parse(fs.readFileSync(sessionPath(), 'utf8'));
+  } catch {
+    /* no session */
+  }
+  let wins = [];
+  if (saved && Array.isArray(saved.windows)) wins = saved.windows.filter((w) => w && Array.isArray(w.tabs) && w.tabs.length);
+  else if (saved && Array.isArray(saved.tabs) && saved.tabs.length) wins = [saved]; // legacy
+  const startUrl = urlFromArgv(process.argv);
+  if (!wins.length) {
+    createBrowserWindow();
+    if (startUrl) createTab({ url: startUrl, activate: true });
+    return;
+  }
+  wins.forEach((wsess, i) => {
+    // Skip windows whose profile was deleted; fall back to default.
+    const pid = wsess.profileId && profiles.getProfile(wsess.profileId) ? wsess.profileId : 'default';
+    createBrowserWindow({ profileId: pid, session: wsess });
+    if (i === 0 && startUrl) createTab({ url: startUrl, activate: true });
+  });
 }
 
 // --- AI prompt building + routing (unchanged behavior) ---
@@ -1518,9 +1699,9 @@ function buildAgentMessages(transcript) {
 let fetcherView = null;
 let fetcherChain = Promise.resolve();
 function ensureFetcher() {
-  if (fetcherView || !win) return fetcherView;
+  if (fetcherView || !S.win) return fetcherView;
   fetcherView = new WebContentsView({ webPreferences: { ...SECURE_PREFS } });
-  win.contentView.addChildView(fetcherView);
+  S.win.contentView.addChildView(fetcherView);
   fetcherView.setBounds({ x: 0, y: 0, width: 1024, height: 768 });
   fetcherView.setVisible(false);
   return fetcherView;
@@ -1621,7 +1802,7 @@ async function executeTool(name, input) {
       let url = String(input.url || '');
       if (!url) return 'No URL given.';
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-      if (heroView) heroView.webContents.send('hero:add-dial', { name: input.name || '', url });
+      if (S.heroView) S.heroView.webContents.send('hero:add-dial', { name: input.name || '', url });
       return 'Added ' + url + ' to the start page.';
     }
     default:
@@ -1730,6 +1911,13 @@ async function runApiAI({ conversationId, provider, transcript }, sender) {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
+  // One-time: move existing single-profile data into profiles/default/ before
+  // anything reads it. Idempotent; keeps .bak copies.
+  try {
+    migrateToProfiles(app.getPath('userData'));
+  } catch {
+    /* non-fatal */
+  }
   AI_CWD = path.join(app.getPath('userData'), 'ai-scratch');
   try {
     fs.mkdirSync(AI_CWD, { recursive: true });
@@ -1740,15 +1928,13 @@ app.whenReady().then(() => {
   applyDoh();
   setupPermissions();
   setupDownloads();
-  createWindow();
+  restoreWindows();
   setupBlocker();
   registerAsBrowser(); // make Slash selectable in Windows Default Apps (packaged)
-  loadSavedExtensions(); // re-load unpacked extensions the user added
-  // Enable installing extensions straight from the Chrome Web Store (and reload
-  // previously store-installed ones). The library manages their storage.
-  installChromeWebStore({ session: session.defaultSession }).catch(() => {});
+  // Per-profile extensions (load + Web Store) are set up by ensureExtensions when
+  // each profile's first window opens.
   favicons.seedBrands(); // pre-cache the fixed brand icons locally (no 3rd party)
-  setInterval(maybeSuspendIdleTabs, 60 * 1000); // free idle background tabs' RAM
+  setInterval(maybeSuspendIdleTabs, 60 * 1000); // free idle background S.tabs' RAM
 
   // Local MCP server exposing the browser tools, so the free CLIs can drive
   // the browser. The config (with a per-session token + the chosen port) is
@@ -1771,7 +1957,7 @@ app.whenReady().then(() => {
 
   setupUpdater();
   app.on('activate', () => {
-    if (BaseWindow.getAllWindows().length === 0) createWindow();
+    if (BaseWindow.getAllWindows().length === 0) createBrowserWindow();
   });
 });
 
@@ -1780,8 +1966,42 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// Resolve which window an IPC event came from (its chrome views or one of its
+// tab views) so the per-window functions act on that window. Falls back to the
+// focused window.
+function windowFromEvent(e) {
+  const wc = e && e.sender;
+  if (wc) {
+    for (const W of windows) {
+      const views = [
+        W.chromeView, W.heroView, W.aiView, W.aiPageView, W.popoverView,
+        W.findView, W.ctxView, W.permView, W.interstitialView, W.settingsView,
+      ];
+      if (views.some((v) => v && v.webContents === wc)) return W;
+      if (W.tabs.some((t) => t.view && t.view.webContents === wc)) return W;
+    }
+  }
+  return focusedWindow();
+}
+// Wrap ipcMain so every handler first points S at the sending window. Bracket
+// notation keeps these two calls out of the on/handle -> onWin/handleWin rewrite.
+function onWin(channel, fn) {
+  ipcMain['on'](channel, (e, ...args) => {
+    const W = windowFromEvent(e);
+    if (W) useWindow(W);
+    return fn(e, ...args);
+  });
+}
+function handleWin(channel, fn) {
+  return ipcMain['handle'](channel, (e, ...args) => {
+    const W = windowFromEvent(e);
+    if (W) useWindow(W);
+    return fn(e, ...args);
+  });
+}
+
 // --- IPC: navigation (acts on the active tab) ---
-ipcMain.handle('navigate', (_e, input) => {
+handleWin('navigate', (_e, input) => {
   if (isAIAddress(input)) {
     goAIPage();
     return 'slash://ai';
@@ -1791,31 +2011,31 @@ ipcMain.handle('navigate', (_e, input) => {
   if (url && at) {
     at.onHero = false;
     at.onAIPage = false;
-    settingsOpen = false;
+    S.settingsOpen = false;
     at.view.webContents.loadURL(url);
     updateContentVisibility();
   }
   return url;
 });
-ipcMain.on('back', () => {
+onWin('back', () => {
   const at = activeTab();
   if (at && at.view.webContents.navigationHistory?.canGoBack()) at.view.webContents.navigationHistory.goBack();
 });
-ipcMain.on('forward', () => {
+onWin('forward', () => {
   const at = activeTab();
   if (at && at.view.webContents.navigationHistory?.canGoForward())
     at.view.webContents.navigationHistory.goForward();
 });
-ipcMain.on('reload', () => {
+onWin('reload', () => {
   const at = activeTab();
   if (at && !at.onHero) at.view.webContents.reload();
 });
-ipcMain.on('stop', () => {
+onWin('stop', () => {
   const at = activeTab();
   if (at) at.view.webContents.stop();
 });
-ipcMain.on('go-home', goHome);
-ipcMain.on('ready', () => {
+onWin('go-home', goHome);
+onWin('ready', () => {
   sendState();
   sendTabs();
   sendDownloads();
@@ -1823,55 +2043,55 @@ ipcMain.on('ready', () => {
   sendBlocked();
   maybeShowFirstRun();
 });
-ipcMain.on('zoom', (_e, dir) => {
+onWin('zoom', (_e, dir) => {
   const at = activeTab();
   if (!at) return;
   const wc = at.view.webContents;
   if (dir === 'reset') wc.setZoomLevel(0);
   else wc.setZoomLevel(wc.getZoomLevel() + (dir === 'in' ? 0.5 : -0.5));
 });
-ipcMain.on('open-settings', () => {
+onWin('open-settings', () => {
   toggleAI(true);
-  aiView.webContents.send('open-settings');
+  S.aiView.webContents.send('open-settings');
 });
-ipcMain.on('settings:open', (_e, section) => openSettingsPage(section));
-ipcMain.on('settings:close', closeSettingsPage);
-ipcMain.on('settings:open-ai', () => {
+onWin('settings:open', (_e, section) => openSettingsPage(section));
+onWin('settings:close', closeSettingsPage);
+onWin('settings:open-ai', () => {
   closeSettingsPage();
   toggleAI(true);
-  aiView.webContents.send('open-settings');
+  S.aiView.webContents.send('open-settings');
 });
-ipcMain.on('download:open', (_e, id) => {
+onWin('download:open', (_e, id) => {
   const d = downloads.find((x) => x.id === id);
   if (d && d.path) shell.openPath(d.path);
 });
-ipcMain.on('download:show', (_e, id) => {
+onWin('download:show', (_e, id) => {
   const d = downloads.find((x) => x.id === id);
   if (d && d.path) shell.showItemInFolder(d.path);
 });
-ipcMain.on('pop:toggle', (_e, kind) => togglePopover(kind));
-ipcMain.on('pop:close', hidePopover);
-ipcMain.on('pop:setup', () => showPopover('setup')); // open the import picker from the profile menu
+onWin('pop:toggle', (_e, kind) => togglePopover(kind));
+onWin('pop:close', hidePopover);
+onWin('pop:setup', () => showPopover('setup')); // open the import picker from the profile menu
 
 // --- IPC: default search engine (omnibox picker + start page share one value) ---
 // list = the full engine set (omnibox dropdown). favorites = the ordered subset
 // shown as quick-pick chips on the start page (user-customizable).
-ipcMain.handle('search:get', () => {
+handleWin('search:get', () => {
   const fav = (readSettings().heroEngines || []).filter((id) => engineExists(id));
   return { current: readSettings().searchEngine, list: allEngineMeta(), favorites: fav };
 });
-ipcMain.on('search:set', (_e, id) => {
+onWin('search:set', (_e, id) => {
   if (!engineExists(id)) return;
   writeSettings({ searchEngine: id });
   broadcastSearchEngine();
   hidePopover();
 });
 // The start page (or settings) saves the quick-pick chips (add/remove/reorder).
-ipcMain.on('hero:engines-set', (_e, ids) => {
+onWin('hero:engines-set', (_e, ids) => {
   if (!Array.isArray(ids)) return;
   writeSettings({ heroEngines: ids.filter((id) => engineExists(id)) });
-  if (heroView) {
-    heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((id) => engineExists(id)));
+  if (S.heroView) {
+    S.heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((id) => engineExists(id)));
   }
 });
 
@@ -1904,10 +2124,10 @@ function addEngineInternal(label, url) {
   broadcastEngineList();
   return { ok: true, engine: { id, label, domain, custom: true } };
 }
-ipcMain.handle('engine:add', (_e, { label, url } = {}) => addEngineInternal(label, url));
+handleWin('engine:add', (_e, { label, url } = {}) => addEngineInternal(label, url));
 
 // Remove a custom engine and clean up any references to it.
-ipcMain.handle('engine:remove', (_e, id) => {
+handleWin('engine:remove', (_e, id) => {
   const existing = customEngines();
   if (!existing.some((c) => c.id === id)) return { error: 'not a custom engine' };
   const s = readSettings();
@@ -1917,8 +2137,8 @@ ipcMain.handle('engine:remove', (_e, id) => {
   writeSettings(patch);
   broadcastSearchEngine();
   broadcastEngineList();
-  if (heroView) {
-    heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((x) => engineExists(x)));
+  if (S.heroView) {
+    S.heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((x) => engineExists(x)));
   }
   return { ok: true };
 });
@@ -1996,15 +2216,15 @@ function parseOpenSearch(xml) {
 }
 
 function tabByContents(wc) {
-  return tabs.find((t) => t.view && t.view.webContents === wc) || null;
+  return S.tabs.find((t) => t.view && t.view.webContents === wc) || null;
 }
 // Push the active tab's "add this site" state to the toolbar.
 function sendAddEngine() {
   const at = activeTab();
   const pe = at && at.pendingEngine ? at.pendingEngine : null;
-  if (chromeView) chromeView.webContents.send('add-engine', pe ? { name: pe.name } : null);
+  if (S.chromeView) S.chromeView.webContents.send('add-engine', pe ? { name: pe.name } : null);
 }
-ipcMain.on('opensearch:found', async (e, { href } = {}) => {
+onWin('opensearch:found', async (e, { href } = {}) => {
   const tab = tabByContents(e.sender);
   if (!tab || !href || tab.pendingEngineHref === href) return;
   tab.pendingEngineHref = href;
@@ -2020,12 +2240,12 @@ ipcMain.on('opensearch:found', async (e, { href } = {}) => {
     // Don't offer one we already have (built-in or custom) for this domain.
     if (allEngineMeta().some((m) => m.domain === domain)) return;
     tab.pendingEngine = { name: meta.name || domain, template: meta.template, domain };
-    if (tab.id === activeTabId) sendAddEngine();
+    if (tab.id === S.activeTabId) sendAddEngine();
   } catch {
     /* ignore */
   }
 });
-ipcMain.handle('engine:add-current', () => {
+handleWin('engine:add-current', () => {
   const at = activeTab();
   if (!at || !at.pendingEngine) return { error: 'nothing to add' };
   const r = addEngineInternal(at.pendingEngine.name, at.pendingEngine.template);
@@ -2037,7 +2257,7 @@ ipcMain.handle('engine:add-current', () => {
 });
 
 // --- IPC: bookmarks ---
-ipcMain.on('bookmark:toggle', () => {
+onWin('bookmark:toggle', () => {
   const at = activeTab();
   if (!at || at.onHero) return;
   const url = at.view.webContents.getURL();
@@ -2046,54 +2266,54 @@ ipcMain.on('bookmark:toggle', () => {
   sendBookmarks();
   sendState();
 });
-ipcMain.on('bookmark:remove', (_e, url) => {
+onWin('bookmark:remove', (_e, url) => {
   store.removeBookmark(url);
   sendBookmarks();
   sendState();
 });
 
 // --- IPC: find-in-page ---
-ipcMain.on('find:query', (_e, { text, forward }) => {
+onWin('find:query', (_e, { text, forward }) => {
   const at = activeTab();
   if (!at) return;
-  findText = text || '';
-  if (!findText) {
+  S.findText = text || '';
+  if (!S.findText) {
     at.view.webContents.stopFindInPage('clearSelection');
     return;
   }
-  at.view.webContents.findInPage(findText, { forward: forward !== false, findNext: false });
+  at.view.webContents.findInPage(S.findText, { forward: forward !== false, findNext: false });
 });
-ipcMain.on('find:next', (_e, forward) => {
+onWin('find:next', (_e, forward) => {
   const at = activeTab();
-  if (at && findText) at.view.webContents.findInPage(findText, { forward, findNext: true });
+  if (at && S.findText) at.view.webContents.findInPage(S.findText, { forward, findNext: true });
 });
-ipcMain.on('find:close', hideFind);
-ipcMain.on('find:show', showFind);
+onWin('find:close', hideFind);
+onWin('find:show', showFind);
 
 // --- IPC: context menu ---
-ipcMain.on('ctx:invoke', (_e, id) => runCtxAction(id));
-ipcMain.on('ctx:close', hideContext);
+onWin('ctx:invoke', (_e, id) => runCtxAction(id));
+onWin('ctx:close', hideContext);
 
 // --- IPC: permission prompt ---
-ipcMain.on('perm:decide', (_e, allow) => decidePermission(allow));
+onWin('perm:decide', (_e, allow) => decidePermission(allow));
 
 // --- IPC: ad/tracker blocker toggle (from the shield popover) ---
-ipcMain.on('blocker:toggle', () => {
+onWin('blocker:toggle', () => {
   const next = !readSettings().blockAds;
   writeSettings({ blockAds: next });
   setBlocking(next);
-  if (popKind === 'shield') sendShield();
+  if (S.popKind === 'shield') sendShield();
   sendBlocked();
 });
 
 // --- IPC: site-info popover (clear a remembered per-site permission) ---
-ipcMain.on('perm:clear', (_e, { origin, perm }) => {
+onWin('perm:clear', (_e, { origin, perm }) => {
   store.clearPermission(origin, perm);
-  if (popKind === 'siteinfo') sendSiteinfo();
+  if (S.popKind === 'siteinfo') sendSiteinfo();
 });
 
 // --- IPC: HTTPS-only interstitial ---
-ipcMain.on('interstitial:continue', () => {
+onWin('interstitial:continue', () => {
   const at = activeTab();
   if (!at || !at.failedHttp) return;
   const httpUrl = at.failedHttp;
@@ -2103,7 +2323,7 @@ ipcMain.on('interstitial:continue', () => {
   at.view.webContents.loadURL(httpUrl);
   updateContentVisibility();
 });
-ipcMain.on('interstitial:back', () => {
+onWin('interstitial:back', () => {
   const at = activeTab();
   if (!at) return;
   at.failedHttp = null;
@@ -2113,19 +2333,19 @@ ipcMain.on('interstitial:back', () => {
 });
 
 // --- IPC: history ---
-ipcMain.on('pop:history', () => showPopover('history'));
-ipcMain.on('history:clear', () => {
+onWin('pop:history', () => showPopover('history'));
+onWin('history:clear', () => {
   store.clearHistory();
-  if (popKind === 'history' && popoverView) popoverView.webContents.send('history', []);
+  if (S.popKind === 'history' && S.popoverView) S.popoverView.webContents.send('history', []);
 });
 
 // --- IPC: hero AI model providers (drives the hero pills + panel) ---
-ipcMain.handle('providers:get', () =>
+handleWin('providers:get', () =>
   Object.entries(PROVIDERS).map(([id, p]) => ({ id, label: p.label, domain: p.domain })),
 );
 
 // --- IPC: search suggestions (fetched in main to dodge CORS) ---
-ipcMain.handle('suggest:get', async (_e, query) => {
+handleWin('suggest:get', async (_e, query) => {
   const q = (query || '').trim();
   if (!q) return [];
   try {
@@ -2139,22 +2359,23 @@ ipcMain.handle('suggest:get', async (_e, query) => {
   }
 });
 
-// --- IPC: tabs ---
-ipcMain.on('tab:new', () => createTab());
-ipcMain.on('tab:new-private', () => createTab({ private: true, activate: true }));
-ipcMain.on('tab:close', (_e, id) => closeTab(id));
-ipcMain.on('tab:activate', (_e, id) => activateTab(id));
-ipcMain.on('tab:reopen', () => reopenClosed());
-ipcMain.on('tab:menu', (_e, { id, x, y }) => {
-  tabMenuTarget = id;
-  tabMenuPos = { x: x | 0, y: y | 0 };
+// --- IPC: S.tabs ---
+onWin('tab:new', () => createTab());
+onWin('tab:new-private', () => createTab({ private: true, activate: true }));
+onWin('window:new', () => createBrowserWindow());
+onWin('tab:close', (_e, id) => closeTab(id));
+onWin('tab:activate', (_e, id) => activateTab(id));
+onWin('tab:reopen', () => reopenClosed());
+onWin('tab:menu', (_e, { id, x, y }) => {
+  S.tabMenuTarget = id;
+  S.tabMenuPos = { x: x | 0, y: y | 0 };
   showPopover('tabmenu');
 });
-ipcMain.on('tab:action', (_e, action) => {
-  const id = tabMenuTarget;
+onWin('tab:action', (_e, action) => {
+  const id = S.tabMenuTarget;
   hidePopover();
   if (!id) return;
-  const tab = tabs.find((t) => t.id === id);
+  const tab = S.tabs.find((t) => t.id === id);
   if (action === 'pin') setPinned(id, true);
   else if (action === 'unpin') setPinned(id, false);
   else if (action === 'close') closeTab(id);
@@ -2165,19 +2386,19 @@ ipcMain.on('tab:action', (_e, action) => {
 });
 
 // --- IPC: AI panel ---
-ipcMain.on('toggle-ai', () => toggleAI());
-ipcMain.on('open-ai', () => toggleAI(true));
-ipcMain.on('ai:send', (e, payload) => runAI(payload, e.sender));
+onWin('toggle-ai', () => toggleAI());
+onWin('open-ai', () => toggleAI(true));
+onWin('ai:send', (e, payload) => runAI(payload, e.sender));
 
 // Handoff between the docked sidebar and the full-screen slash://ai page.
-ipcMain.on('ai:to-page', (_e, data) => {
+onWin('ai:to-page', (_e, data) => {
   toggleAI(false); // close the docked sidebar
   goAIPage({ load: data });
 });
-ipcMain.on('ai:open-web', (_e, url) => {
+onWin('ai:open-web', (_e, url) => {
   if (typeof url === 'string' && /^https?:\/\//i.test(url)) createTab({ url, activate: true });
 });
-ipcMain.on('ai:to-sidebar', (_e, data) => {
+onWin('ai:to-sidebar', (_e, data) => {
   const at = activeTab();
   if (at) {
     at.onAIPage = false;
@@ -2187,26 +2408,26 @@ ipcMain.on('ai:to-sidebar', (_e, data) => {
   sendState();
   sendTabs();
   toggleAI(true);
-  aiView.webContents.send('ai:load', data);
+  S.aiView.webContents.send('ai:load', data);
 });
 
 // --- Infobar: a non-blocking strip in the chrome, shared by the first-run
 // default-browser prompt and update notifications. ---
 function showInfobar(payload) {
-  infobarOpen = true;
-  CHROME_HEIGHT = BASE_CHROME + INFOBAR_HEIGHT;
-  if (chromeView) chromeView.webContents.send('infobar:show', payload);
+  S.infobarOpen = true;
+  S.CHROME_HEIGHT = BASE_CHROME + INFOBAR_HEIGHT;
+  if (S.chromeView) S.chromeView.webContents.send('infobar:show', payload);
   layout();
 }
 function hideInfobar() {
-  infobarOpen = false;
-  CHROME_HEIGHT = BASE_CHROME;
-  if (chromeView) chromeView.webContents.send('infobar:hide');
+  S.infobarOpen = false;
+  S.CHROME_HEIGHT = BASE_CHROME;
+  if (S.chromeView) S.chromeView.webContents.send('infobar:hide');
   layout();
 }
 function maybeShowFirstRun() {
   const s = readSettings();
-  if (s.seenDefaultPrompt || infobarOpen) return;
+  if (s.seenDefaultPrompt || S.infobarOpen) return;
   // Shown once per fresh profile. We no longer skip it when already the default
   // browser: the welcome also offers to import your data, which is useful
   // regardless. The picker itself reflects current default status.
@@ -2249,7 +2470,7 @@ function setupUpdater() {
   autoUpdater.checkForUpdates().catch(() => {});
 }
 
-ipcMain.on('infobar:action', (_e, { id, key }) => {
+onWin('infobar:action', (_e, { id, key }) => {
   if (id === 'firstrun') {
     writeSettings({ seenDefaultPrompt: true }); // engaged or dismissed: don't nag again
     hideInfobar();
@@ -2292,7 +2513,7 @@ ipcMain.on('infobar:action', (_e, { id, key }) => {
 });
 
 // --- IPC: default browser ---
-ipcMain.handle('default:status', () => app.isDefaultProtocolClient('http'));
+handleWin('default:status', () => app.isDefaultProtocolClient('http'));
 // Register Slash as a web browser in Windows so it shows up in Default Apps.
 // electron-builder's installer registers a protocol handler but not the full
 // browser capability, so we write the StartMenuInternet keys (HKCU, no admin).
@@ -2333,7 +2554,7 @@ function registerAsBrowser() {
   }
 }
 
-ipcMain.handle('default:set', () => {
+handleWin('default:set', () => {
   registerAsBrowser();
   app.setAsDefaultProtocolClient('http');
   app.setAsDefaultProtocolClient('https');
@@ -2359,9 +2580,9 @@ async function migrateSourceList() {
   }
   return out;
 }
-ipcMain.handle('migrate:sources', () => migrateSourceList());
+handleWin('migrate:sources', () => migrateSourceList());
 
-ipcMain.handle('migrate:run', async (_e, { id, types }) => {
+handleWin('migrate:run', async (_e, { id, types }) => {
   const s = migrate.sourceById(id);
   if (!s) return { error: 'source not found' };
   const want = new Set(Array.isArray(types) ? types : []);
@@ -2421,11 +2642,11 @@ ipcMain.handle('migrate:run', async (_e, { id, types }) => {
 });
 
 // --- IPC: password vault ---
-ipcMain.handle('vault:list', () => vault.list());
-ipcMain.handle('vault:count', () => vault.count());
-ipcMain.handle('vault:remove', (_e, { host, username }) => vault.remove(host, username));
-ipcMain.handle('vault:importCsv', async () => {
-  const r = await dialog.showOpenDialog(win, {
+handleWin('vault:list', () => vault.list());
+handleWin('vault:count', () => vault.count());
+handleWin('vault:remove', (_e, { host, username }) => vault.remove(host, username));
+handleWin('vault:importCsv', async () => {
+  const r = await dialog.showOpenDialog(S.win, {
     title: 'Import passwords from CSV',
     properties: ['openFile'],
     filters: [{ name: 'CSV', extensions: ['csv'] }],
@@ -2440,7 +2661,7 @@ ipcMain.handle('vault:importCsv', async () => {
 });
 
 // --- IPC: autofill (used by the per-tab preload) ---
-ipcMain.handle('autofill:get', (_e, origin) => {
+handleWin('autofill:get', (_e, origin) => {
   try {
     return vault.forOrigin(origin);
   } catch {
@@ -2448,7 +2669,7 @@ ipcMain.handle('autofill:get', (_e, origin) => {
   }
 });
 let pendingSave = null;
-ipcMain.on('autofill:capture', (_e, { origin, username, password }) => {
+onWin('autofill:capture', (_e, { origin, username, password }) => {
   if (!password) return;
   // Already saved with the same password? Nothing to offer.
   const existing = vault.forOrigin(origin).find((l) => l.username === (username || ''));
@@ -2519,7 +2740,7 @@ function getProfile() {
   cachedProfile = { name, username, picture };
   return cachedProfile;
 }
-ipcMain.handle('profile:get', () => {
+handleWin('profile:get', () => {
   try {
     return getProfile();
   } catch {
@@ -2527,9 +2748,58 @@ ipcMain.handle('profile:get', () => {
   }
 });
 
+// --- IPC: user profiles (Work / School / ...): create, switch, manage ---
+handleWin('profiles:list', () => profiles.listProfiles());
+handleWin('profiles:current', () => profiles.getProfile(S.profileId) || { id: S.profileId, name: 'Personal' });
+function broadcastProfiles() {
+  const list = profiles.listProfiles();
+  for (const W of windows) {
+    if (W.popoverView) W.popoverView.webContents.send('profiles', { list, current: W.profileId });
+    if (W.settingsView) W.settingsView.webContents.send('profiles', { list, current: W.profileId });
+  }
+}
+// Open a window running the given profile (creating a fresh window for it).
+onWin('profile:open-window', (_e, id) => {
+  if (!profiles.getProfile(id)) return;
+  createBrowserWindow({ profileId: id });
+});
+handleWin('profiles:create', (_e, { name, color } = {}) => {
+  const p = profiles.createProfile({ name, color });
+  createBrowserWindow({ profileId: p.id }); // open it right away
+  broadcastProfiles();
+  return p;
+});
+handleWin('profiles:rename', (_e, { id, name } = {}) => {
+  const p = profiles.renameProfile(id, name);
+  windows.filter((W) => W.profileId === id).forEach((W) => applyWindowProfile(W));
+  broadcastProfiles();
+  return p;
+});
+handleWin('profiles:recolor', (_e, { id, color } = {}) => {
+  const p = profiles.recolorProfile(id, color);
+  windows.filter((W) => W.profileId === id).forEach((W) => applyWindowProfile(W));
+  broadcastProfiles();
+  return p;
+});
+handleWin('profiles:delete', (_e, id) => {
+  // Close any windows running this profile first, then drop its data.
+  for (const W of [...windows]) {
+    if (W.profileId === id) {
+      try {
+        W.win.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  const r = profiles.deleteProfile(id);
+  broadcastProfiles();
+  return r;
+});
+
 // --- IPC: favicons (served from the local cache, never a 3rd-party service) ---
 // Returns a data URL or '' so the renderer can fall back to a monogram.
-ipcMain.handle('favicon:get', (_e, host) => {
+handleWin('favicon:get', (_e, host) => {
   try {
     const d = favicons.get(host);
     if (!d) {
@@ -2545,24 +2815,24 @@ ipcMain.handle('favicon:get', (_e, host) => {
 });
 
 // --- IPC: app stats (memory + tab counts) for the menu readout ---
-ipcMain.handle('app:stats', () => {
+handleWin('app:stats', () => {
   let kb = 0;
   try {
     for (const m of app.getAppMetrics()) kb += (m.memory && m.memory.workingSetSize) || 0;
   } catch {
     /* ignore */
   }
-  const asleep = tabs.filter((t) => t.suspended).length;
-  return { memMB: Math.round(kb / 1024), tabs: tabs.length, asleep };
+  const asleep = S.tabs.filter((t) => t.suspended).length;
+  return { memMB: Math.round(kb / 1024), tabs: S.tabs.length, asleep };
 });
 
 // --- IPC: clear browsing data ---
-ipcMain.handle('data:clear', async (_e, opts = {}) => {
+handleWin('data:clear', async (_e, opts = {}) => {
   const done = {};
   if (opts.history) {
     store.clearHistory();
     done.history = true;
-    if (popKind === 'history' && popoverView) popoverView.webContents.send('history', []);
+    if (S.popKind === 'history' && S.popoverView) S.popoverView.webContents.send('history', []);
   }
   if (opts.cookies) {
     try {
@@ -2588,57 +2858,59 @@ ipcMain.handle('data:clear', async (_e, opts = {}) => {
 // --- IPC: Chrome extensions (Web Store / load unpacked / list / remove) ---
 // Electron 35+ moved the extension methods under session.extensions; fall back
 // to the (deprecated) session methods on older versions.
-function extApi() {
-  const ses = session.defaultSession;
-  return ses.extensions || ses;
+function extApi(ses) {
+  const s = ses || session.defaultSession;
+  return s.extensions || s;
 }
-function loadSavedExtensions() {
-  for (const dir of readSettings().extensions || []) {
+function loadSavedExtensions(profileId = 'default') {
+  const ses = profileSession(profileId);
+  for (const dir of readSettings(profileId).extensions || []) {
     try {
       if (fs.existsSync(dir)) {
-        extApi().loadExtension(dir, { allowFileAccess: true }).catch(() => {});
+        extApi(ses).loadExtension(dir, { allowFileAccess: true }).catch(() => {});
       }
     } catch {
       /* ignore a bad path */
     }
   }
 }
-ipcMain.handle('extensions:load', async () => {
-  const r = await dialog.showOpenDialog(win, {
+handleWin('extensions:load', async () => {
+  const pid = S.profileId;
+  const r = await dialog.showOpenDialog(S.win, {
     title: 'Load an unpacked extension (the folder with its manifest.json)',
     properties: ['openDirectory'],
   });
   if (r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };
   const dir = r.filePaths[0];
   try {
-    const ext = await extApi().loadExtension(dir, { allowFileAccess: true });
-    const list = readSettings().extensions || [];
-    if (!list.includes(dir)) writeSettings({ extensions: list.concat([dir]) });
+    const ext = await extApi(profileSession(pid)).loadExtension(dir, { allowFileAccess: true });
+    const list = readSettings(pid).extensions || [];
+    if (!list.includes(dir)) writeSettings({ extensions: list.concat([dir]) }, pid);
     return { ok: true, ext: { id: ext.id, name: ext.name, version: ext.version } };
   } catch (e) {
     return { error: String(e.message || e) };
   }
 });
-ipcMain.handle('extensions:store', () => {
+handleWin('extensions:store', () => {
   createTab({ url: 'https://chromewebstore.google.com/', activate: true });
   return { ok: true };
 });
-ipcMain.handle('extensions:list', () => {
+handleWin('extensions:list', () => {
   try {
-    return extApi()
+    return extApi(profileSession(S.profileId))
       .getAllExtensions()
       .map((e) => ({ id: e.id, name: e.name, version: e.version, path: e.path }));
   } catch {
     return [];
   }
 });
-ipcMain.handle('extensions:remove', (_e, id) => {
+handleWin('extensions:remove', (_e, id) => {
+  const pid = S.profileId;
   try {
-    const ext = extApi()
-      .getAllExtensions()
-      .find((x) => x.id === id);
-    extApi().removeExtension(id);
-    if (ext) writeSettings({ extensions: (readSettings().extensions || []).filter((p) => p !== ext.path) });
+    const api = extApi(profileSession(pid));
+    const ext = api.getAllExtensions().find((x) => x.id === id);
+    api.removeExtension(id);
+    if (ext) writeSettings({ extensions: (readSettings(pid).extensions || []).filter((p) => p !== ext.path) }, pid);
     return { ok: true };
   } catch (e) {
     return { error: String(e.message || e) };
@@ -2646,8 +2918,8 @@ ipcMain.handle('extensions:remove', (_e, id) => {
 });
 
 // --- IPC: settings ---
-ipcMain.handle('settings:get', () => readSettings());
-ipcMain.handle('settings:set', (_e, patch) => {
+handleWin('settings:get', () => readSettings());
+handleWin('settings:set', (_e, patch) => {
   const next = writeSettings(patch);
   if (patch.accent) broadcastAccent();
   if (typeof patch.doh === 'boolean') applyDoh();
@@ -2658,30 +2930,30 @@ ipcMain.handle('settings:set', (_e, patch) => {
 });
 
 // --- IPC: hero search + direct open (load into the active tab) ---
-ipcMain.on('hero:search', (_e, { engine, query }) => {
+onWin('hero:search', (_e, { engine, query }) => {
   const at = activeTab();
   if (query && query.trim() && at) {
     at.onHero = false;
     at.onAIPage = false;
-    settingsOpen = false;
+    S.settingsOpen = false;
     at.view.webContents.loadURL(buildSearchUrl(engine, query.trim()));
     updateContentVisibility();
   }
 });
-ipcMain.on('hero:open', (_e, { url }) => {
+onWin('hero:open', (_e, { url }) => {
   const at = activeTab();
   const target = normalizeInput(url);
   if (target && at) {
     at.onHero = false;
     at.onAIPage = false;
-    settingsOpen = false;
+    S.settingsOpen = false;
     at.view.webContents.loadURL(target);
     updateContentVisibility();
   }
 });
 // From the hero's "Ask AI" mode: open the panel, set the chosen model, and
 // send the prompt into it.
-ipcMain.on('hero:ask-ai', (_e, { text, provider }) => {
+onWin('hero:ask-ai', (_e, { text, provider }) => {
   const t = (text || '').trim();
   goAIPage(t ? { prompt: { text: t, provider } } : {});
 });

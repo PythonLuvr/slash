@@ -8,7 +8,17 @@ const fs = require('fs');
 const HISTORY_CAP = 10000;
 const ENC_PREFIX = 'enc:v1:';
 
+// History/bookmarks/permissions are per profile. The active profile is set by
+// the app whenever the focused/operated window changes (single-threaded, so the
+// path is always correct for the operation in progress).
+let currentProfile = 'default';
+function setProfile(id) {
+  currentProfile = id || 'default';
+}
 function storePath() {
+  return path.join(app.getPath('userData'), 'profiles', currentProfile, 'data.json');
+}
+function legacyStorePath() {
   return path.join(app.getPath('userData'), 'slash-data.json');
 }
 
@@ -32,7 +42,13 @@ function read() {
   try {
     raw = JSON.parse(fs.readFileSync(storePath(), 'utf8'));
   } catch {
-    return emptyData();
+    // Pre-migration fallback: the default profile's data used to live here.
+    try {
+      if (currentProfile !== 'default') return emptyData();
+      raw = JSON.parse(fs.readFileSync(legacyStorePath(), 'utf8'));
+    } catch {
+      return emptyData();
+    }
   }
   let obj = raw;
   try {
@@ -172,6 +188,7 @@ function allowHttp(origin) {
 }
 
 module.exports = {
+  setProfile,
   getBookmarks,
   isBookmarked,
   addBookmark,
