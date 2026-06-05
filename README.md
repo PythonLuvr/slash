@@ -17,9 +17,6 @@
 <p align="center">
   <img src="assets/hero.png" width="860" alt="Slash start page in Search mode, with the /slash brand and engine quick-picks" />
 </p>
-<p align="center">
-  <img src="assets/hero-ai.png" width="860" alt="Slash start page in Ask AI mode, choosing between Claude, Gemini, and ChatGPT" />
-</p>
 
 ---
 
@@ -67,6 +64,10 @@ The honest boundary is what makes the rest credible:
 Slash removes the browser as the surveillance machine and shields you from trackers. It does not pretend to make you invisible.
 
 ## The AI
+
+<p align="center">
+  <img src="assets/hero-ai.png" width="820" alt="Slash start page in Ask AI mode, choosing between Claude, Gemini, and ChatGPT" />
+</p>
 
 Pick your provider (Claude, Gemini, or ChatGPT) and how it runs:
 
