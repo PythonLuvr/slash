@@ -1448,10 +1448,7 @@ function createBrowserWindow(opts = {}) {
   S.aiView.setVisible(false);
 
   S.chromeView = new WebContentsView({
-    // Trusted first-party UI. sandbox is off only here so the preload can require
-    // the browser-action element module; the page itself still has no Node access
-    // (contextIsolation on, nodeIntegration off).
-    webPreferences: { ...SECURE_PREFS, sandbox: false, preload: path.join(__dirname, 'preload.js') },
+    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'preload.js') },
   });
   S.win.contentView.addChildView(S.chromeView);
   S.chromeView.webContents.loadFile(path.join(__dirname, 'index.html'));

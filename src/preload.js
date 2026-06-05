@@ -1,13 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Make the <browser-action-list> element (extension toolbar icons + popups)
-// available in the chrome UI. Best-effort: never break the toolbar if it fails.
-try {
-  require('electron-chrome-extensions/browser-action').injectBrowserAction();
-} catch {
-  /* extensions toolbar unavailable */
-}
-
 // The only surface our chrome UI (tab strip + toolbar) can touch in main.
 contextBridge.exposeInMainWorld('slash', {
   // navigation
