@@ -9,6 +9,7 @@ const { startMcpServer } = require('./lib/mcp-server');
 const { autoUpdater } = require('electron-updater');
 const store = require('./lib/store');
 const migrate = require('./lib/migrate');
+const { migrateToProfiles } = require('./lib/migrate-profiles');
 const vault = require('./lib/vault');
 const favicons = require('./lib/favicons');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
@@ -134,6 +135,15 @@ let S = null;
 function focusedWindow() {
   if (focusedW && windows.includes(focusedW)) return focusedW;
   return windows.find((W) => W.win && !W.win.isDestroyed() && W.win.isFocused()) || windows[0] || null;
+}
+// Make W the active window context AND point the per-profile stores at its
+// profile, so history/passwords read and write the right profile's data.
+function useWindow(W) {
+  S = W;
+  if (W) {
+    store.setProfile(W.profileId);
+    vault.setProfile(W.profileId);
+  }
 }
 
 function activeTab() {
@@ -939,7 +949,7 @@ function attachTabView(tab) {
 
   const refresh = () => {
     if (!wc || wc.isDestroyed()) return;
-    S = myW; // events can fire for a background window; act on the tab's window
+    useWindow(myW); // events can fire for a background window; act on the tab's window
     tab.url = wc.getURL();
     const t = wc.getTitle();
     if (t) tab.title = t;
@@ -961,7 +971,7 @@ function attachTabView(tab) {
     wc.on(ev, refresh);
   }
   wc.on('page-favicon-updated', (_e, favs) => {
-    S = myW;
+    useWindow(myW);
     tab.favicon = (favs && favs[0]) || null;
     // Cache the real favicon locally so the start page / bookmarks can show it
     // without calling a third-party favicon service.
@@ -979,7 +989,7 @@ function attachTabView(tab) {
   });
   // Find-in-page match counts for this tab.
   wc.on('found-in-page', (_e, result) => {
-    S = myW;
+    useWindow(myW);
     if (S.findView) {
       S.findView.webContents.send('find:result', {
         active: result.activeMatchOrdinal,
@@ -990,7 +1000,7 @@ function attachTabView(tab) {
   // HTTPS-only: a failed upgrade shows the interstitial; any fresh load clears it.
   wc.on('did-fail-load', (_e, errorCode, _desc, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // -3 = ERR_ABORTED
-    S = myW;
+    useWindow(myW);
     const httpUrl = upgraded.get(validatedURL);
     if (httpUrl) {
       upgraded.delete(validatedURL);
@@ -1003,7 +1013,7 @@ function attachTabView(tab) {
     }
   });
   wc.on('did-start-loading', () => {
-    S = myW;
+    useWindow(myW);
     tab.blocked = 0;
     // New page: forget any "add this site" offer until it re-declares one.
     tab.pendingEngine = null;
@@ -1025,13 +1035,13 @@ function attachTabView(tab) {
   });
   // Right-click anywhere in the page opens our custom context menu.
   wc.on('context-menu', (_e, params) => {
-    S = myW;
+    useWindow(myW);
     hidePopover();
     showContext(params);
   });
   // Links that open a new window become new tabs (private stays private).
   wc.setWindowOpenHandler(({ url }) => {
-    S = myW;
+    useWindow(myW);
     createTab({ url, activate: true, private: tab.private });
     return { action: 'deny' };
   });
@@ -1247,9 +1257,10 @@ function createBrowserWindow(opts = {}) {
   // on. Views (S.chromeView etc.) are assigned below. S.win/S.tabs are still module
   // globals in this batch and move onto W in the next.
   const W = {};
+  W.profileId = opts.profileId || 'default';
   windows.push(W);
   focusedW = W;
-  S = W;
+  useWindow(W);
   W.tabs = [];
   W.activeTabId = null;
   W.tabSeq = 0;
@@ -1389,7 +1400,7 @@ function createBrowserWindow(opts = {}) {
 
   S.win.on('focus', () => {
     focusedW = W;
-    S = W; // user is interacting with this window now
+    useWindow(W);
   });
 
   S.win.on('closed', () => {
@@ -1403,11 +1414,11 @@ function createBrowserWindow(opts = {}) {
       }
     }
     if (focusedW === W) focusedW = windows[0] || null;
-    if (S === W) S = focusedW;
+    if (S === W) useWindow(focusedW);
   });
 
   S.win.on('resize', () => {
-    S = W;
+    useWindow(W);
     hideContext();
     layout();
   });
@@ -1800,6 +1811,13 @@ async function runApiAI({ conversationId, provider, transcript }, sender) {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
+  // One-time: move existing single-profile data into profiles/default/ before
+  // anything reads it. Idempotent; keeps .bak copies.
+  try {
+    migrateToProfiles(app.getPath('userData'));
+  } catch {
+    /* non-fatal */
+  }
   AI_CWD = path.join(app.getPath('userData'), 'ai-scratch');
   try {
     fs.mkdirSync(AI_CWD, { recursive: true });
@@ -1872,14 +1890,14 @@ function windowFromEvent(e) {
 function onWin(channel, fn) {
   ipcMain['on'](channel, (e, ...args) => {
     const W = windowFromEvent(e);
-    if (W) S = W;
+    if (W) useWindow(W);
     return fn(e, ...args);
   });
 }
 function handleWin(channel, fn) {
   return ipcMain['handle'](channel, (e, ...args) => {
     const W = windowFromEvent(e);
-    if (W) S = W;
+    if (W) useWindow(W);
     return fn(e, ...args);
   });
 }
