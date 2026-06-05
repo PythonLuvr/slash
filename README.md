@@ -15,10 +15,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/hero.png" width="840" alt="Slash start page with the /slash brand, search, and engine quick-picks" />
-</p>
-<p align="center">
-  <img src="assets/browsing.png" width="840" alt="Slash browsing a real web page" />
+  <img src="assets/hero.png" width="860" alt="Slash start page with the /slash brand, search, and engine quick-picks" />
 </p>
 
 ---
