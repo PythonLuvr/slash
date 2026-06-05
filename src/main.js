@@ -2176,8 +2176,11 @@ ipcMain.on('infobar:action', (_e, { id, key }) => {
   } else if (id === 'savepw') {
     if (key === 'save' && pendingSave) {
       vault.upsert(pendingSave);
+    } else if (key === 'never' && pendingSave && pendingSave.host) {
+      // Remember not to ask for this site again.
+      const blocked = readSettings().pwBlocked || [];
+      if (!blocked.includes(pendingSave.host)) writeSettings({ pwBlocked: blocked.concat([pendingSave.host]) });
     }
-    // 'never' could persist a per-origin block later; for now just dismiss.
     pendingSave = null;
     hideInfobar();
   }
@@ -2220,7 +2223,7 @@ ipcMain.handle('migrate:run', async (_e, { id, types }) => {
   if (want.has('bookmarks')) {
     let added = 0;
     try {
-      for (const b of migrate.readBookmarks(s)) {
+      for (const b of await migrate.readBookmarks(s)) {
         if (!store.isBookmarked(b.url)) {
           store.addBookmark(b);
           added++;
@@ -2310,7 +2313,9 @@ ipcMain.on('autofill:capture', (_e, { origin, username, password }) => {
   } catch {
     /* keep origin */
   }
-  pendingSave = { origin, username, password };
+  // The user chose "Never" for this site before: respect it.
+  if ((readSettings().pwBlocked || []).includes(host)) return;
+  pendingSave = { origin, username, password, host };
   showInfobar({
     id: 'savepw',
     text: existing ? `Update the saved password for ${host}?` : `Save password for ${host}?`,

@@ -136,6 +136,34 @@ function listProfiles(userDataDir) {
   }));
 }
 
+// Firefox stores bookmarks + history in places.sqlite. Cookies/passwords use
+// NSS (key4.db), which we don't decrypt, so Firefox sources offer the first two.
+function firefoxSources() {
+  const AD = process.env.APPDATA || '';
+  const root = path.join(AD, 'Mozilla', 'Firefox', 'Profiles');
+  const out = [];
+  let entries = [];
+  try {
+    entries = fs.readdirSync(root);
+  } catch {
+    return out;
+  }
+  for (const dir of entries) {
+    const profileDir = path.join(root, dir);
+    if (!fs.existsSync(path.join(profileDir, 'places.sqlite'))) continue;
+    // Profile dirs look like "xxxxxxxx.default-release"; show the readable part.
+    const label = dir.includes('.') ? dir.split('.').slice(1).join('.') : dir;
+    out.push({
+      id: `firefox|${dir}`,
+      browser: 'firefox',
+      kind: 'firefox',
+      name: label && label !== 'default' ? `Firefox (${label})` : 'Firefox',
+      profileDir,
+    });
+  }
+  return out;
+}
+
 // Public: every importable (browser, profile) pair present on this machine.
 function discoverSources() {
   const out = [];
@@ -146,21 +174,40 @@ function discoverSources() {
       out.push({
         id: `${b.id}|${p.dir}`,
         browser: b.id,
+        kind: 'chromium',
         name: p.label ? `${b.name} (${p.label})` : b.name,
         userDataDir: b.userDataDir,
         profileDir,
       });
     }
   }
-  return out;
+  return out.concat(firefoxSources());
 }
 
 function sourceById(id) {
   return discoverSources().find((s) => s.id === id) || null;
 }
 
-// --- Bookmarks (plain JSON) ---
-function readBookmarks(src) {
+// --- Bookmarks ---
+async function readFirefoxBookmarks(src) {
+  const file = path.join(src.profileDir, 'places.sqlite');
+  if (!fs.existsSync(file)) return [];
+  const db = await openDb(file);
+  try {
+    return rows(
+      db,
+      `SELECT p.url AS url, COALESCE(b.title, p.title) AS title
+       FROM moz_bookmarks b JOIN moz_places p ON b.fk = p.id
+       WHERE b.type = 1 AND p.url LIKE 'http%'`,
+    ).map((x) => ({ url: x.url, title: x.title || x.url }));
+  } finally {
+    db.close();
+  }
+}
+// Chromium bookmarks are plain JSON; Firefox needs the SQLite read above.
+// Always async so both kinds can be awaited the same way.
+async function readBookmarks(src) {
+  if (src.kind === 'firefox') return readFirefoxBookmarks(src);
   const file = path.join(src.profileDir, 'Bookmarks');
   if (!fs.existsSync(file)) return [];
   const data = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -178,7 +225,24 @@ function readBookmarks(src) {
 }
 
 // --- History (SQLite) ---
+// Firefox: places.sqlite, last_visit_date is microseconds since the unix epoch.
+async function readFirefoxHistory(src, limit) {
+  const file = path.join(src.profileDir, 'places.sqlite');
+  if (!fs.existsSync(file)) return [];
+  const db = await openDb(file);
+  try {
+    return rows(
+      db,
+      `SELECT url, title, last_visit_date FROM moz_places
+       WHERE last_visit_date IS NOT NULL AND url LIKE 'http%'
+       ORDER BY last_visit_date DESC LIMIT ${Number(limit) | 0}`,
+    ).map((x) => ({ url: x.url, title: x.title || x.url, time: Math.round((x.last_visit_date || 0) / 1000) }));
+  } finally {
+    db.close();
+  }
+}
 async function readHistory(src, limit = 5000) {
+  if (src.kind === 'firefox') return readFirefoxHistory(src, limit);
   const file = path.join(src.profileDir, 'History');
   if (!fs.existsSync(file)) return [];
   const db = await openDb(file);
@@ -268,6 +332,7 @@ const SAMESITE = { 0: 'no_restriction', 1: 'lax', 2: 'strict' };
 // Read + decrypt cookies into objects shaped for Electron session.cookies.set.
 // Returns { cookies, appBound, failed }.
 async function readCookies(src) {
+  if (src.kind === 'firefox') return { cookies: [], appBound: 0, failed: 0 }; // NSS, not supported
   const dbFile = [path.join(src.profileDir, 'Network', 'Cookies'), path.join(src.profileDir, 'Cookies')].find((f) =>
     fs.existsSync(f),
   );
@@ -327,6 +392,7 @@ async function readCookies(src) {
 // Returns { logins:[{url,username,password}], appBound, failed } ready for the
 // vault. Chrome's app-bound ('v20') passwords are skipped and counted.
 async function readPasswords(src) {
+  if (src.kind === 'firefox') return { logins: [], appBound: 0, failed: 0 }; // NSS, not supported
   const dbFile = path.join(src.profileDir, 'Login Data');
   if (!fs.existsSync(dbFile)) return { logins: [], appBound: 0, failed: 0 };
   const aesKey = cookieAesKey(src.userDataDir);
@@ -362,10 +428,30 @@ async function readPasswords(src) {
 async function describe(src) {
   const info = { bookmarks: 0, history: 0, cookies: false, passwords: 0 };
   try {
-    info.bookmarks = readBookmarks(src).length;
+    info.bookmarks = (await readBookmarks(src)).length;
   } catch {
     /* ignore */
   }
+
+  // Firefox: bookmarks + history only (cookies/passwords use NSS, unsupported).
+  if (src.kind === 'firefox') {
+    try {
+      const f = path.join(src.profileDir, 'places.sqlite');
+      if (fs.existsSync(f)) {
+        const db = await openDb(f);
+        try {
+          const r = rows(db, "SELECT COUNT(*) AS n FROM moz_places WHERE last_visit_date IS NOT NULL AND url LIKE 'http%'");
+          info.history = (r[0] && r[0].n) || 0;
+        } finally {
+          db.close();
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return info;
+  }
+
   try {
     const f = path.join(src.profileDir, 'History');
     if (fs.existsSync(f)) {

@@ -5,7 +5,7 @@ const { app, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-const HISTORY_CAP = 2000;
+const HISTORY_CAP = 10000;
 const ENC_PREFIX = 'enc:v1:';
 
 function storePath() {
