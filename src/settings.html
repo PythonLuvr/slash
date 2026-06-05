@@ -139,6 +139,23 @@
         </div>
       </section>
 
+      <section id="sec-performance">
+        <h2>Performance</h2>
+        <div class="row">
+          <div class="label">
+            <div class="name">Memory limit</div>
+            <div class="desc">Cap how much RAM Slash uses. When it goes over, the least-recently-used background tabs are put to sleep and reload instantly when you click them. Lower keeps it lean; higher keeps more tabs loaded for the smoothest experience.</div>
+          </div>
+          <select id="ram-limit" class="select">
+            <option value="500">500 MB (leanest)</option>
+            <option value="1000">1 GB</option>
+            <option value="2000">2 GB</option>
+            <option value="4000">4 GB</option>
+            <option value="0">Unlimited (smoothest)</option>
+          </select>
+        </div>
+      </section>
+
       <section>
         <h2>Updates</h2>
         <div class="row toggle-row" data-key="updatesEnabled">

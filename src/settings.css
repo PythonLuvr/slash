@@ -611,3 +611,21 @@ section h2 {
   cursor: pointer;
   flex: 0 0 auto;
 }
+
+/* Select dropdown (e.g. memory limit) */
+.select {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  outline: none;
+}
+.select:focus {
+  border-color: var(--accent);
+}

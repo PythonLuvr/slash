@@ -1275,10 +1275,58 @@ function wakeTab(tab) {
 
 function maybeSuspendIdleTabs() {
   const now = Date.now();
-  for (const t of S.tabs) {
-    if (t.id === S.activeTabId || t.suspended || !t.view || t.onHero) continue;
-    if (now - (t.lastActive || 0) > SUSPEND_MS) suspendTab(t);
+  const prev = S;
+  for (const W of windows) {
+    useWindow(W);
+    for (const t of W.tabs) {
+      if (t.id === W.activeTabId || t.suspended || !t.view || t.onHero) continue;
+      if (now - (t.lastActive || 0) > SUSPEND_MS) suspendTab(t);
+    }
   }
+  if (prev) useWindow(prev);
+}
+
+// Total app memory across every process, in MB.
+function totalMemoryMB() {
+  try {
+    return Math.round(app.getAppMetrics().reduce((s, m) => s + (m.memory ? m.memory.workingSetSize : 0), 0) / 1024);
+  } catch {
+    return 0;
+  }
+}
+
+// RAM limiter (Opera GX style): when total memory is over the user's cap,
+// discard the least-recently-used background tabs until it's back under, or
+// there are none left to discard. The active tab is never touched.
+function enforceRamLimit() {
+  const cap = readSettings().ramLimitMB;
+  if (!cap) return; // 0 = unlimited
+  let overage = totalMemoryMB() - cap;
+  if (overage <= 0) return;
+  const metrics = app.getAppMetrics();
+  const memByPid = new Map(metrics.map((m) => [m.pid, m.memory ? Math.round(m.memory.workingSetSize / 1024) : 0]));
+  const candidates = [];
+  for (const W of windows) {
+    for (const t of W.tabs) {
+      if (t.id === W.activeTabId || t.suspended || !t.view || t.onHero || t.private) continue;
+      candidates.push({ W, t });
+    }
+  }
+  candidates.sort((a, b) => (a.t.lastActive || 0) - (b.t.lastActive || 0)); // LRU first
+  const prev = S;
+  for (const { W, t } of candidates) {
+    if (overage <= 0) break;
+    let freed = 150; // fallback estimate if we can't read the renderer's footprint
+    try {
+      freed = memByPid.get(t.view.webContents.getOSProcessId()) || freed;
+    } catch {
+      /* use estimate */
+    }
+    useWindow(W);
+    suspendTab(t);
+    overage -= freed; // estimate; the next tick rechecks actual memory and converges
+  }
+  if (prev) useWindow(prev);
 }
 
 function closeTab(id) {
@@ -1921,7 +1969,8 @@ app.whenReady().then(() => {
   // Per-profile extensions (load + Web Store) are set up by ensureExtensions when
   // each profile's first window opens.
   favicons.seedBrands(); // pre-cache the fixed brand icons locally (no 3rd party)
-  setInterval(maybeSuspendIdleTabs, 60 * 1000); // free idle background S.tabs' RAM
+  setInterval(maybeSuspendIdleTabs, 60 * 1000); // free long-idle background tabs
+  setInterval(enforceRamLimit, 12 * 1000); // keep total memory under the user's cap
 
   // Local MCP server exposing the browser tools, so the free CLIs can drive
   // the browser. The config (with a per-session token + the chosen port) is

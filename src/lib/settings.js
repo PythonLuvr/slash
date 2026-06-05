@@ -31,7 +31,7 @@ function profileSettingsPath(profileId) {
 
 // Which keys are shared app-wide vs stored per profile.
 const PROFILE_KEYS = ['searchEngine', 'heroEngines', 'customEngines', 'pwBlocked', 'extensions'];
-const APP_KEYS = ['selection', 'apiKeys', 'apiModels', 'accent', 'doh', 'httpsOnly', 'blockAds', 'seenDefaultPrompt', 'updatesEnabled'];
+const APP_KEYS = ['selection', 'apiKeys', 'apiModels', 'accent', 'doh', 'httpsOnly', 'blockAds', 'seenDefaultPrompt', 'updatesEnabled', 'ramLimitMB'];
 
 // Sensible, editable defaults. Nothing here is secret or user-specific.
 const DEFAULTS = {
@@ -53,6 +53,7 @@ const DEFAULTS = {
   blockAds: true, // EasyList/EasyPrivacy tracker + ad blocking
   seenDefaultPrompt: false, // shown the first-run "set as default" prompt yet
   updatesEnabled: true, // check for + offer updates (user can ignore further updates)
+  ramLimitMB: 500, // RAM cap; over it, idle background tabs are discarded. 0 = unlimited
 };
 
 const ENC_PREFIX = 'enc:v1:';
@@ -134,6 +135,7 @@ function readSettings(profileId = DEFAULT_PROFILE) {
     blockAds: bool(appRaw.blockAds, DEFAULTS.blockAds),
     seenDefaultPrompt: bool(appRaw.seenDefaultPrompt, DEFAULTS.seenDefaultPrompt),
     updatesEnabled: bool(appRaw.updatesEnabled, DEFAULTS.updatesEnabled),
+    ramLimitMB: typeof appRaw.ramLimitMB === 'number' ? appRaw.ramLimitMB : DEFAULTS.ramLimitMB,
   };
 }
 
@@ -156,6 +158,7 @@ function writeSettings(patch, profileId = DEFAULT_PROFILE) {
       typeof patch.seenDefaultPrompt === 'boolean' ? patch.seenDefaultPrompt : cur.seenDefaultPrompt,
     updatesEnabled:
       typeof patch.updatesEnabled === 'boolean' ? patch.updatesEnabled : cur.updatesEnabled,
+    ramLimitMB: typeof patch.ramLimitMB === 'number' ? patch.ramLimitMB : cur.ramLimitMB,
   };
 
   // App-level subset (keys encrypted for disk).

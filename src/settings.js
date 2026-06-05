@@ -32,7 +32,19 @@ async function load(section) {
   renderVault();
   renderExtensions();
   renderProfiles();
+  renderPerformance();
   scrollToSection(section);
+}
+
+// --- Performance: RAM limit ---
+function renderPerformance() {
+  const sel = $('ram-limit');
+  if (!sel) return;
+  const v = typeof current.ramLimitMB === 'number' ? current.ramLimitMB : 500;
+  sel.value = String(v);
+  sel.onchange = async () => {
+    current = await window.settings.set({ ramLimitMB: parseInt(sel.value, 10) || 0 });
+  };
 }
 
 // --- Profiles (Work / School / ...) ---
