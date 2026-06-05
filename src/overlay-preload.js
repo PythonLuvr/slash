@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Bridge for the top-right popover layer (menu / profile / downloads).
 contextBridge.exposeInMainWorld('overlay', {
   newTab: () => ipcRenderer.send('tab:new'),
+  newPrivateTab: () => ipcRenderer.send('tab:new-private'),
   reopenTab: () => ipcRenderer.send('tab:reopen'),
   zoom: (dir) => ipcRenderer.send('zoom', dir),
   toggleAI: () => ipcRenderer.send('toggle-ai'),

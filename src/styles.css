@@ -92,6 +92,23 @@
   padding: 0;
 }
 
+/* Private tab: indigo accent + a mask glyph so it's unmistakable. */
+.tab.private {
+  background: rgba(124, 108, 214, 0.16);
+  box-shadow: inset 2px 0 0 #8f7fe0;
+}
+
+.tab.private.active {
+  background: rgba(124, 108, 214, 0.26);
+}
+
+.tab .tab-mask {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1;
+  filter: grayscale(0.2);
+}
+
 .tab .favicon {
   width: 15px;
   height: 15px;

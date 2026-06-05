@@ -192,10 +192,10 @@ function searchURL(q) {
 // DNS-over-HTTPS so lookups are not readable by the network/ISP. 'secure'
 // means all DNS goes through DoH; toggle off in settings if a resolver is
 // blocked on your network.
-function applyDoh() {
+function applyDoh(ses = session.defaultSession) {
   try {
     const on = readSettings().doh;
-    session.defaultSession.configureHostResolver(
+    ses.configureHostResolver(
       on
         ? {
             secureDnsMode: 'secure',
@@ -328,8 +328,7 @@ function sendBlocked() {
   });
 }
 
-function setupPermissions() {
-  const ses = session.defaultSession;
+function setupPermissions(ses = session.defaultSession) {
   ses.setPermissionRequestHandler((wc, permission, callback, details) => {
     if (!PROMPTABLE.has(permission)) return callback(true);
     const origin = originOf((details && details.requestingUrl) || (wc && wc.getURL()));
@@ -343,6 +342,40 @@ function setupPermissions() {
     if (!PROMPTABLE.has(permission)) return true;
     return store.getPermission(requestingOrigin, permission) === 'allow';
   });
+}
+
+// --- Private tabs ---
+// Private tabs share one in-memory session (no `persist:` prefix), so they keep
+// no cookies/cache/storage on disk and record no history. Closing the last one
+// wipes the session. The same hardening (permissions, DoH, blocker) is applied.
+const PRIVATE_PARTITION = 'slash-private';
+let privateReady = false;
+function privateSession() {
+  return session.fromPartition(PRIVATE_PARTITION);
+}
+function ensurePrivateSession() {
+  if (privateReady) return;
+  const ps = privateSession();
+  try {
+    setupPermissions(ps);
+    applyDoh(ps);
+    if (readSettings().blockAds && blocker) blocker.enableBlockingInSession(ps);
+  } catch {
+    /* best effort */
+  }
+  privateReady = true;
+}
+function hasPrivateTabs() {
+  return tabs.some((t) => t.private);
+}
+function clearPrivateSession() {
+  try {
+    privateSession()
+      .clearStorageData()
+      .catch(() => {});
+  } catch {
+    /* ignore */
+  }
 }
 
 function enqueuePermission(req) {
@@ -528,6 +561,7 @@ function sendTabs() {
       loading: t.loading,
       suspended: !!t.suspended,
       pinned: !!t.pinned,
+      private: !!t.private,
     })),
   );
   scheduleSessionSave(); // persist the open-tab set for next launch
@@ -889,9 +923,9 @@ function togglePopover(kind) {
 // autofill preload that fills saved logins and never exposes them.
 function attachTabView(tab) {
   const id = tab.id;
-  const view = new WebContentsView({
-    webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'tab-preload.js') },
-  });
+  const webPreferences = { ...SECURE_PREFS, preload: path.join(__dirname, 'tab-preload.js') };
+  if (tab.private) webPreferences.partition = PRIVATE_PARTITION; // in-memory, no traces
+  const view = new WebContentsView({ webPreferences });
   tab.view = view;
   const wc = view.webContents;
 
@@ -923,11 +957,14 @@ function attachTabView(tab) {
     sendTabs();
   });
   // History: record on real navigations, update the title when it resolves.
+  // Private tabs leave no history.
   wc.on('did-navigate', () => {
     upgraded.delete(wc.getURL());
-    store.addHistory({ url: wc.getURL(), title: wc.getTitle() });
+    if (!tab.private) store.addHistory({ url: wc.getURL(), title: wc.getTitle() });
   });
-  wc.on('page-title-updated', () => store.addHistory({ url: wc.getURL(), title: wc.getTitle() }));
+  wc.on('page-title-updated', () => {
+    if (!tab.private) store.addHistory({ url: wc.getURL(), title: wc.getTitle() });
+  });
   // Find-in-page match counts for this tab.
   wc.on('found-in-page', (_e, result) => {
     if (findView) {
@@ -976,9 +1013,9 @@ function attachTabView(tab) {
     hidePopover();
     showContext(params);
   });
-  // Links that open a new window become new tabs.
+  // Links that open a new window become new tabs (private stays private).
   wc.setWindowOpenHandler(({ url }) => {
-    createTab({ url, activate: true });
+    createTab({ url, activate: true, private: tab.private });
     return { action: 'deny' };
   });
   attachShortcuts(wc);
@@ -991,6 +1028,7 @@ function attachTabView(tab) {
 
 function createTab(opts = {}) {
   const id = ++tabSeq;
+  if (opts.private) ensurePrivateSession(); // harden the in-memory session first
   const tab = {
     id,
     view: null,
@@ -1007,6 +1045,7 @@ function createTab(opts = {}) {
     lastActive: Date.now(), // for idle-based suspension
     suspended: false, // renderer freed; url/title/favicon kept
     pinned: false, // pinned tabs sit first, compact, and survive "close others"
+    private: !!opts.private, // in-memory session, no history, no traces
   };
   attachTabView(tab);
   tabs.push(tab);
@@ -1082,7 +1121,8 @@ function closeTab(id) {
   const idx = tabs.findIndex((t) => t.id === id);
   if (idx < 0) return;
   const tab = tabs[idx];
-  if (tab.url) closedStack.push(tab.url);
+  // Private tabs never go on the reopen stack (no traces).
+  if (tab.url && !tab.private) closedStack.push(tab.url);
   if (tab.view) {
     win.contentView.removeChildView(tab.view);
     try {
@@ -1092,6 +1132,8 @@ function closeTab(id) {
     }
   }
   tabs.splice(idx, 1);
+  // Wipe the private session once the last private tab is gone.
+  if (tab.private && !hasPrivateTabs()) clearPrivateSession();
 
   if (activeTabId === id) {
     const next = tabs[idx] || tabs[idx - 1];
@@ -1150,6 +1192,7 @@ function attachShortcuts(wc) {
 
     if (key === 'j') return (toggleAI(), stop());
     if (key === 't' && !input.shift) return (createTab(), stop());
+    if (key === 'n' && input.shift) return (createTab({ private: true, activate: true }), stop());
     if (key === 'w') return (activeTabId && closeTab(activeTabId), stop());
     if (key === 't' && input.shift) return (reopenClosed(), stop());
     if (key === 'tab') return (cycleTab(input.shift ? -1 : 1), stop());
@@ -1286,7 +1329,8 @@ function sessionPath() {
   return path.join(app.getPath('userData'), 'slash-session.json');
 }
 function saveSession() {
-  const open = tabs.filter((t) => !t.onHero && (t.url || t.suspended));
+  // Private tabs are ephemeral and never restored.
+  const open = tabs.filter((t) => !t.onHero && !t.private && (t.url || t.suspended));
   const list = open.map((t) => ({ url: t.url, title: t.title, pinned: !!t.pinned }));
   const active = Math.max(0, open.findIndex((t) => t.id === activeTabId));
   try {
@@ -2037,6 +2081,7 @@ ipcMain.handle('suggest:get', async (_e, query) => {
 
 // --- IPC: tabs ---
 ipcMain.on('tab:new', () => createTab());
+ipcMain.on('tab:new-private', () => createTab({ private: true, activate: true }));
 ipcMain.on('tab:close', (_e, id) => closeTab(id));
 ipcMain.on('tab:activate', (_e, id) => activateTab(id));
 ipcMain.on('tab:reopen', () => reopenClosed());

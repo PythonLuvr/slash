@@ -117,6 +117,7 @@ function renderStats() {
 
 const ACTIONS = {
   newtab: () => window.overlay.newTab(),
+  private: () => window.overlay.newPrivateTab(),
   reopen: () => window.overlay.reopenTab(),
   'zoom-in': () => window.overlay.zoom('in'),
   'zoom-out': () => window.overlay.zoom('out'),

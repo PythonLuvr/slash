@@ -65,11 +65,24 @@ function renderTabs(list) {
   for (const t of list) {
     const tab = document.createElement('div');
     tab.className =
-      'tab' + (t.active ? ' active' : '') + (t.suspended ? ' suspended' : '') + (t.pinned ? ' pinned' : '');
+      'tab' +
+      (t.active ? ' active' : '') +
+      (t.suspended ? ' suspended' : '') +
+      (t.pinned ? ' pinned' : '') +
+      (t.private ? ' private' : '');
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-selected', t.active ? 'true' : 'false');
     tab.tabIndex = t.active ? 0 : -1;
-    tab.title = t.title;
+    tab.title = t.private ? 'Private tab · ' + t.title : t.title;
+
+    // Private tabs get a small mask glyph so they're unmistakable.
+    if (t.private) {
+      const m = document.createElement('span');
+      m.className = 'tab-mask';
+      m.textContent = '🕶';
+      m.setAttribute('aria-hidden', 'true');
+      tab.appendChild(m);
+    }
 
     // favicon (or a neutral fallback)
     if (t.favicon) {
