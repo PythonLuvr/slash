@@ -1216,6 +1216,7 @@ function attachShortcuts(wc) {
 
     if (key === 'j') return (toggleAI(), stop());
     if (key === 't' && !input.shift) return (createTab(), stop());
+    if (key === 'n' && !input.shift) return (createBrowserWindow(), stop());
     if (key === 'n' && input.shift) return (createTab({ private: true, activate: true }), stop());
     if (key === 'w') return (S.activeTabId && closeTab(S.activeTabId), stop());
     if (key === 't' && input.shift) return (reopenClosed(), stop());
@@ -1241,7 +1242,7 @@ function attachShortcuts(wc) {
   });
 }
 
-function createBrowserWindow() {
+function createBrowserWindow(opts = {}) {
   // Per-window state lives on W; S points at the window currently being operated
   // on. Views (S.chromeView etc.) are assigned below. S.win/S.tabs are still module
   // globals in this batch and move onto W in the next.
@@ -1391,18 +1392,35 @@ function createBrowserWindow() {
     S = W; // user is interacting with this window now
   });
 
+  S.win.on('closed', () => {
+    const i = windows.indexOf(W);
+    if (i !== -1) windows.splice(i, 1);
+    for (const t of W.tabs) {
+      try {
+        if (t.view && !t.view.webContents.isDestroyed()) t.view.webContents.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
+    if (focusedW === W) focusedW = windows[0] || null;
+    if (S === W) S = focusedW;
+  });
+
   S.win.on('resize', () => {
+    S = W;
     hideContext();
     layout();
   });
   layout();
 
-  // Bring back last session's S.tabs (background S.tabs come back suspended/lazy).
-  restoreSession();
-  // If launched as the default browser with a URL (e.g. clicked link), open it.
-  const startUrl = urlFromArgv(process.argv);
-  if (startUrl) createTab({ url: startUrl, activate: true });
-  if (!S.tabs.length) createTab(); // nothing restored and no link: a fresh hero tab
+  // At startup we restore last session's tabs (background tabs come back
+  // suspended/lazy). A window opened later (Ctrl+N) starts with a fresh hero tab.
+  if (opts.restore) {
+    restoreSession();
+    const startUrl = urlFromArgv(process.argv);
+    if (startUrl) createTab({ url: startUrl, activate: true });
+  }
+  if (!S.tabs.length) createTab(); // nothing restored / fresh window: a hero tab
   return W;
 }
 
@@ -1772,7 +1790,7 @@ app.whenReady().then(() => {
   applyDoh();
   setupPermissions();
   setupDownloads();
-  createBrowserWindow();
+  createBrowserWindow({ restore: true });
   setupBlocker();
   registerAsBrowser(); // make Slash selectable in Windows Default Apps (packaged)
   loadSavedExtensions(); // re-load unpacked extensions the user added
@@ -2208,6 +2226,7 @@ handleWin('suggest:get', async (_e, query) => {
 // --- IPC: S.tabs ---
 onWin('tab:new', () => createTab());
 onWin('tab:new-private', () => createTab({ private: true, activate: true }));
+onWin('window:new', () => createBrowserWindow());
 onWin('tab:close', (_e, id) => closeTab(id));
 onWin('tab:activate', (_e, id) => activateTab(id));
 onWin('tab:reopen', () => reopenClosed());
