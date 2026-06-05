@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('settings', {
   extLoad: () => ipcRenderer.invoke('extensions:load'),
   extList: () => ipcRenderer.invoke('extensions:list'),
   extRemove: (id) => ipcRenderer.invoke('extensions:remove', id),
+  extStore: () => ipcRenderer.invoke('extensions:store'),
   // Migration (bookmarks / history / cookies) from another browser.
   migrateSources: () => ipcRenderer.invoke('migrate:sources'),
   migrateRun: (id, types) => ipcRenderer.invoke('migrate:run', { id, types }),

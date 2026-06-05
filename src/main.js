@@ -12,6 +12,7 @@ const migrate = require('./lib/migrate');
 const vault = require('./lib/vault');
 const favicons = require('./lib/favicons');
 const { ElectronChromeExtensions } = require('electron-chrome-extensions');
+const { installChromeWebStore } = require('electron-chrome-web-store');
 
 let extensions = null; // Chrome-extension API layer (set up on the window)
 
@@ -1742,7 +1743,10 @@ app.whenReady().then(() => {
   createWindow();
   setupBlocker();
   registerAsBrowser(); // make Slash selectable in Windows Default Apps (packaged)
-  loadSavedExtensions(); // re-load Chrome extensions the user added
+  loadSavedExtensions(); // re-load unpacked extensions the user added
+  // Enable installing extensions straight from the Chrome Web Store (and reload
+  // previously store-installed ones). The library manages their storage.
+  installChromeWebStore({ session: session.defaultSession }).catch(() => {});
   favicons.seedBrands(); // pre-cache the fixed brand icons locally (no 3rd party)
   setInterval(maybeSuspendIdleTabs, 60 * 1000); // free idle background tabs' RAM
 
@@ -2581,12 +2585,18 @@ ipcMain.handle('data:clear', async (_e, opts = {}) => {
   return done;
 });
 
-// --- IPC: Chrome extensions (load unpacked / list / remove) ---
+// --- IPC: Chrome extensions (Web Store / load unpacked / list / remove) ---
+// Electron 35+ moved the extension methods under session.extensions; fall back
+// to the (deprecated) session methods on older versions.
+function extApi() {
+  const ses = session.defaultSession;
+  return ses.extensions || ses;
+}
 function loadSavedExtensions() {
   for (const dir of readSettings().extensions || []) {
     try {
       if (fs.existsSync(dir)) {
-        session.defaultSession.loadExtension(dir, { allowFileAccess: true }).catch(() => {});
+        extApi().loadExtension(dir, { allowFileAccess: true }).catch(() => {});
       }
     } catch {
       /* ignore a bad path */
@@ -2601,7 +2611,7 @@ ipcMain.handle('extensions:load', async () => {
   if (r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };
   const dir = r.filePaths[0];
   try {
-    const ext = await session.defaultSession.loadExtension(dir, { allowFileAccess: true });
+    const ext = await extApi().loadExtension(dir, { allowFileAccess: true });
     const list = readSettings().extensions || [];
     if (!list.includes(dir)) writeSettings({ extensions: list.concat([dir]) });
     return { ok: true, ext: { id: ext.id, name: ext.name, version: ext.version } };
@@ -2609,22 +2619,25 @@ ipcMain.handle('extensions:load', async () => {
     return { error: String(e.message || e) };
   }
 });
+ipcMain.handle('extensions:store', () => {
+  createTab({ url: 'https://chromewebstore.google.com/', activate: true });
+  return { ok: true };
+});
 ipcMain.handle('extensions:list', () => {
   try {
-    return session.defaultSession.getAllExtensions().map((e) => ({
-      id: e.id,
-      name: e.name,
-      version: e.version,
-      path: e.path,
-    }));
+    return extApi()
+      .getAllExtensions()
+      .map((e) => ({ id: e.id, name: e.name, version: e.version, path: e.path }));
   } catch {
     return [];
   }
 });
 ipcMain.handle('extensions:remove', (_e, id) => {
   try {
-    const ext = session.defaultSession.getAllExtensions().find((x) => x.id === id);
-    session.defaultSession.removeExtension(id);
+    const ext = extApi()
+      .getAllExtensions()
+      .find((x) => x.id === id);
+    extApi().removeExtension(id);
     if (ext) writeSettings({ extensions: (readSettings().extensions || []).filter((p) => p !== ext.path) });
     return { ok: true };
   } catch (e) {

@@ -385,6 +385,9 @@ async function renderExtensions() {
     wrap.appendChild(row);
   }
 }
+$('ext-store').addEventListener('click', () => {
+  window.settings.extStore();
+});
 $('ext-load').addEventListener('click', async () => {
   const btn = $('ext-load');
   const msg = $('ext-msg');
