@@ -2,7 +2,7 @@ const { app, BaseWindow, WebContentsView, ipcMain, Menu, session, shell, clipboa
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { spawnSync } = require('child_process');
+const { spawnSync, spawn } = require('child_process');
 const { readSettings, writeSettings } = require('./lib/settings');
 const { STREAMERS, runAnthropicAgent } = require('./lib/api');
 const { startMcpServer } = require('./lib/mcp-server');
@@ -1694,6 +1694,7 @@ app.whenReady().then(() => {
   setupDownloads();
   createWindow();
   setupBlocker();
+  registerAsBrowser(); // make Slash selectable in Windows Default Apps (packaged)
   favicons.seedBrands(); // pre-cache the fixed brand icons locally (no 3rd party)
   setInterval(maybeSuspendIdleTabs, 60 * 1000); // free idle background tabs' RAM
 
@@ -2240,7 +2241,48 @@ ipcMain.on('infobar:action', (_e, { id, key }) => {
 
 // --- IPC: default browser ---
 ipcMain.handle('default:status', () => app.isDefaultProtocolClient('http'));
+// Register Slash as a web browser in Windows so it shows up in Default Apps.
+// electron-builder's installer registers a protocol handler but not the full
+// browser capability, so we write the StartMenuInternet keys (HKCU, no admin).
+// Packaged only: in dev the exe is electron.exe, not Slash.
+function registerAsBrowser() {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  const ps = [
+    '$exe=$env:SLASH_EXE',
+    "$cmd='\"'+$exe+'\" \"%1\"'",
+    "$icon=$exe+',0'",
+    "function RegDef($p,$v){if(-not(Test-Path $p)){New-Item $p -Force|Out-Null};Set-ItemProperty $p '(default)' $v}",
+    "function RegVal($p,$n,$v){if(-not(Test-Path $p)){New-Item $p -Force|Out-Null};Set-ItemProperty $p $n $v}",
+    "$b='HKCU:\\Software\\Clients\\StartMenuInternet\\Slash'",
+    "RegDef $b 'Slash'",
+    'RegDef "$b\\DefaultIcon" $icon',
+    'RegDef "$b\\shell\\open\\command" $cmd',
+    '$c="$b\\Capabilities"',
+    "RegVal $c 'ApplicationName' 'Slash'",
+    'RegVal $c \'ApplicationIcon\' $icon',
+    "RegVal $c 'ApplicationDescription' 'An AI-native, private-by-default web browser.'",
+    'RegVal "$c\\StartMenu" \'StartMenuInternet\' \'Slash\'',
+    'RegVal "$c\\URLAssociations" \'http\' \'SlashHTM\'',
+    'RegVal "$c\\URLAssociations" \'https\' \'SlashHTM\'',
+    "RegVal 'HKCU:\\Software\\RegisteredApplications' 'Slash' 'Software\\Clients\\StartMenuInternet\\Slash\\Capabilities'",
+    "RegDef 'HKCU:\\Software\\Classes\\SlashHTM' 'Slash HTML Document'",
+    "RegDef 'HKCU:\\Software\\Classes\\SlashHTM\\DefaultIcon' $icon",
+    "RegDef 'HKCU:\\Software\\Classes\\SlashHTM\\shell\\open\\command' $cmd",
+  ].join('; ');
+  try {
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+      { windowsHide: true, detached: true, stdio: 'ignore', env: { ...process.env, SLASH_EXE: process.execPath } },
+    );
+    child.unref();
+  } catch {
+    /* best effort */
+  }
+}
+
 ipcMain.handle('default:set', () => {
+  registerAsBrowser();
   app.setAsDefaultProtocolClient('http');
   app.setAsDefaultProtocolClient('https');
   // Windows can't be forced; open the Default Apps page so the user can pick.
