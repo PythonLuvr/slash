@@ -11,6 +11,9 @@ const store = require('./lib/store');
 const migrate = require('./lib/migrate');
 const vault = require('./lib/vault');
 const favicons = require('./lib/favicons');
+const { ElectronChromeExtensions } = require('electron-chrome-extensions');
+
+let extensions = null; // Chrome-extension API layer (set up on the window)
 
 app.setName('Slash');
 // Windows taskbar / notification identity (so it groups as Slash, not Electron).
@@ -730,8 +733,8 @@ function buildContextMenu(p) {
   }
 
   if (items.length) items.push({ sep: true });
-  items.push({ id: 'back', label: 'Back', disabled: !(wc && wc.navigationHistory.canGoBack()) });
-  items.push({ id: 'forward', label: 'Forward', disabled: !(wc && wc.navigationHistory.canGoForward()) });
+  items.push({ id: 'back', label: 'Back', disabled: !(wc && wc.navigationHistory?.canGoBack()) });
+  items.push({ id: 'forward', label: 'Forward', disabled: !(wc && wc.navigationHistory?.canGoForward()) });
   items.push({ id: 'reload', label: 'Reload', disabled: !wc });
   items.push({ sep: true });
   items.push({ id: 'copy-page-url', label: 'Copy page address', disabled: !wc });
@@ -773,10 +776,10 @@ function runCtxAction(id) {
   const wc = activePageWc();
   switch (id) {
     case 'back':
-      if (wc && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
+      if (wc && wc.navigationHistory?.canGoBack()) wc.navigationHistory.goBack();
       break;
     case 'forward':
-      if (wc && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
+      if (wc && wc.navigationHistory?.canGoForward()) wc.navigationHistory.goForward();
       break;
     case 'reload':
       if (wc) wc.reload();
@@ -930,13 +933,23 @@ function attachTabView(tab) {
   const view = new WebContentsView({ webPreferences });
   tab.view = view;
   const wc = view.webContents;
+  // Track this tab for the Chrome-extension APIs (private tabs stay out).
+  if (extensions && !tab.private) {
+    try {
+      extensions.addTab(wc, win);
+    } catch {
+      /* ignore */
+    }
+  }
 
   const refresh = () => {
+    if (!wc || wc.isDestroyed()) return;
     tab.url = wc.getURL();
     const t = wc.getTitle();
     if (t) tab.title = t;
-    tab.canGoBack = wc.navigationHistory.canGoBack();
-    tab.canGoForward = wc.navigationHistory.canGoForward();
+    const nh = wc.navigationHistory;
+    tab.canGoBack = nh ? nh.canGoBack() : false;
+    tab.canGoForward = nh ? nh.canGoForward() : false;
     tab.loading = wc.isLoading();
     if (tab.url) tab.onHero = false;
     if (id === activeTabId) sendState();
@@ -1072,6 +1085,13 @@ function activateTab(id) {
   tab.lastActive = Date.now();
   activeTabId = id;
   settingsOpen = false;
+  if (extensions && tab.view) {
+    try {
+      extensions.selectTab(tab.view.webContents);
+    } catch {
+      /* ignore */
+    }
+  }
   updateContentVisibility();
   sendState();
   sendTabs();
@@ -1227,6 +1247,33 @@ function createWindow() {
     backgroundColor: '#1c1c1f',
     icon: path.join(__dirname, 'icon.png'),
   });
+
+  // Chrome-extension API support (content blockers, etc.). Tabs are registered
+  // with it in attachTabView/activateTab so chrome.tabs works.
+  try {
+    ElectronChromeExtensions.handleCRXProtocol(session.defaultSession);
+    extensions = new ElectronChromeExtensions({
+      license: 'GPL-3.0',
+      session: session.defaultSession,
+      createTab: (details) => {
+        const id = createTab({ url: details.url, activate: details.active !== false });
+        const t = tabs.find((x) => x.id === id);
+        return Promise.resolve([t.view.webContents, win]);
+      },
+      selectTab: (wc) => {
+        const t = tabs.find((x) => x.view && x.view.webContents === wc);
+        if (t) activateTab(t.id);
+      },
+      removeTab: (wc) => {
+        const t = tabs.find((x) => x.view && x.view.webContents === wc);
+        if (t) closeTab(t.id);
+      },
+      createWindow: () => Promise.resolve(win), // single window: reuse it
+      removeWindow: () => {},
+    });
+  } catch {
+    extensions = null;
+  }
 
   heroView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'hero-preload.js') },
@@ -1695,6 +1742,7 @@ app.whenReady().then(() => {
   createWindow();
   setupBlocker();
   registerAsBrowser(); // make Slash selectable in Windows Default Apps (packaged)
+  loadSavedExtensions(); // re-load Chrome extensions the user added
   favicons.seedBrands(); // pre-cache the fixed brand icons locally (no 3rd party)
   setInterval(maybeSuspendIdleTabs, 60 * 1000); // free idle background tabs' RAM
 
@@ -1747,11 +1795,11 @@ ipcMain.handle('navigate', (_e, input) => {
 });
 ipcMain.on('back', () => {
   const at = activeTab();
-  if (at && at.view.webContents.navigationHistory.canGoBack()) at.view.webContents.navigationHistory.goBack();
+  if (at && at.view.webContents.navigationHistory?.canGoBack()) at.view.webContents.navigationHistory.goBack();
 });
 ipcMain.on('forward', () => {
   const at = activeTab();
-  if (at && at.view.webContents.navigationHistory.canGoForward())
+  if (at && at.view.webContents.navigationHistory?.canGoForward())
     at.view.webContents.navigationHistory.goForward();
 });
 ipcMain.on('reload', () => {
@@ -2055,7 +2103,7 @@ ipcMain.on('interstitial:back', () => {
   const at = activeTab();
   if (!at) return;
   at.failedHttp = null;
-  if (at.view.webContents.navigationHistory.canGoBack()) at.view.webContents.navigationHistory.goBack();
+  if (at.view.webContents.navigationHistory?.canGoBack()) at.view.webContents.navigationHistory.goBack();
   else goHome();
   updateContentVisibility();
 });
@@ -2531,6 +2579,57 @@ ipcMain.handle('data:clear', async (_e, opts = {}) => {
     }
   }
   return done;
+});
+
+// --- IPC: Chrome extensions (load unpacked / list / remove) ---
+function loadSavedExtensions() {
+  for (const dir of readSettings().extensions || []) {
+    try {
+      if (fs.existsSync(dir)) {
+        session.defaultSession.loadExtension(dir, { allowFileAccess: true }).catch(() => {});
+      }
+    } catch {
+      /* ignore a bad path */
+    }
+  }
+}
+ipcMain.handle('extensions:load', async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Load an unpacked extension (the folder with its manifest.json)',
+    properties: ['openDirectory'],
+  });
+  if (r.canceled || !r.filePaths || !r.filePaths[0]) return { canceled: true };
+  const dir = r.filePaths[0];
+  try {
+    const ext = await session.defaultSession.loadExtension(dir, { allowFileAccess: true });
+    const list = readSettings().extensions || [];
+    if (!list.includes(dir)) writeSettings({ extensions: list.concat([dir]) });
+    return { ok: true, ext: { id: ext.id, name: ext.name, version: ext.version } };
+  } catch (e) {
+    return { error: String(e.message || e) };
+  }
+});
+ipcMain.handle('extensions:list', () => {
+  try {
+    return session.defaultSession.getAllExtensions().map((e) => ({
+      id: e.id,
+      name: e.name,
+      version: e.version,
+      path: e.path,
+    }));
+  } catch {
+    return [];
+  }
+});
+ipcMain.handle('extensions:remove', (_e, id) => {
+  try {
+    const ext = session.defaultSession.getAllExtensions().find((x) => x.id === id);
+    session.defaultSession.removeExtension(id);
+    if (ext) writeSettings({ extensions: (readSettings().extensions || []).filter((p) => p !== ext.path) });
+    return { ok: true };
+  } catch (e) {
+    return { error: String(e.message || e) };
+  }
 });
 
 // --- IPC: settings ---

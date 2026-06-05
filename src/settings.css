@@ -410,6 +410,20 @@ section h2 {
   color: var(--muted);
 }
 
+/* Extensions */
+.ext-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ext-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
 /* Stacked rows: label on top, control block below (migration). */
 .row.col {
   flex-direction: column;

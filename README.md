@@ -9,7 +9,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-MIT-f1cb53" alt="MIT license" />
+  <img src="https://img.shields.io/badge/app-GPL--3.0-f1cb53" alt="App license GPL-3.0" />
+  <img src="https://img.shields.io/badge/source-MIT-1c1c1f" alt="Source license MIT" />
   <img src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1c1c1f" alt="Platforms" />
   <img src="https://img.shields.io/badge/engine-Chromium%20via%20Electron-1c1c1f" alt="Engine" />
 </p>
@@ -122,4 +123,9 @@ Slash is open source and meant to be hackable. Issues and pull requests are welc
 
 ## License
 
-[MIT](LICENSE). Use it, change it, ship it.
+Slash's own source code is **[MIT](LICENSE)**, reuse any of it freely. The
+**distributed application is GPL-3.0**, because it bundles
+[`electron-chrome-extensions`](https://github.com/samuelmaddock/electron-browser-shell)
+(GPL-3.0) for Chrome extension support. In short: the code you read in this repo
+is MIT, but the built and installed app is copyleft, so any redistribution of
+the app itself must stay open source.

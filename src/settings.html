@@ -107,6 +107,21 @@
         </div>
       </section>
 
+      <section id="sec-extensions">
+        <h2>Extensions</h2>
+        <div class="row col">
+          <div class="label">
+            <div class="name">Chrome extensions</div>
+            <div class="desc">Load an unpacked Chrome extension (the folder that holds its manifest.json). Content blockers and most extensions work; some popup-only ones may not yet. What you add is reloaded each launch.</div>
+          </div>
+          <div id="ext-list" class="ext-list"></div>
+          <div class="ext-actions">
+            <button id="ext-load" class="btn" type="button">Load unpacked extension</button>
+            <span id="ext-msg" class="ce-msg"></span>
+          </div>
+        </div>
+      </section>
+
       <section>
         <h2>Updates</h2>
         <div class="row toggle-row" data-key="updatesEnabled">

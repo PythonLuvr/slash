@@ -30,6 +30,7 @@ async function load(section) {
   renderDefault();
   renderMigrate();
   renderVault();
+  renderExtensions();
   scrollToSection(section);
 }
 
@@ -340,6 +341,74 @@ async function addCustomEngine() {
 $('ce-add').addEventListener('click', addCustomEngine);
 $('ce-url').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addCustomEngine();
+});
+
+// --- Chrome extensions ---
+async function renderExtensions() {
+  const wrap = $('ext-list');
+  if (!wrap) return;
+  let list = [];
+  try {
+    list = await window.settings.extList();
+  } catch {
+    /* ignore */
+  }
+  wrap.innerHTML = '';
+  if (!list.length) {
+    wrap.innerHTML = '<div class="import-empty">No extensions loaded.</div>';
+    return;
+  }
+  for (const e of list) {
+    const row = document.createElement('div');
+    row.className = 'vault-row';
+    const info = document.createElement('div');
+    info.className = 'vault-info';
+    const name = document.createElement('div');
+    name.className = 'vault-host';
+    name.textContent = e.name || e.id;
+    const ver = document.createElement('div');
+    ver.className = 'vault-user';
+    ver.textContent = e.version ? 'v' + e.version : '';
+    info.appendChild(name);
+    info.appendChild(ver);
+    const del = document.createElement('button');
+    del.className = 'vault-del';
+    del.type = 'button';
+    del.setAttribute('aria-label', 'Remove extension');
+    del.innerHTML = '&#10005;';
+    del.addEventListener('click', async () => {
+      await window.settings.extRemove(e.id);
+      renderExtensions();
+    });
+    row.appendChild(info);
+    row.appendChild(del);
+    wrap.appendChild(row);
+  }
+}
+$('ext-load').addEventListener('click', async () => {
+  const btn = $('ext-load');
+  const msg = $('ext-msg');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  let r = {};
+  try {
+    r = await window.settings.extLoad();
+  } catch {
+    r = { error: 'load failed' };
+  }
+  btn.disabled = false;
+  btn.textContent = 'Load unpacked extension';
+  if (r.canceled) {
+    msg.textContent = '';
+  } else if (r.error) {
+    msg.textContent = r.error;
+    msg.classList.add('err');
+  } else {
+    msg.textContent = 'Loaded ' + (r.ext ? r.ext.name : 'extension') + '.';
+    msg.classList.remove('err');
+    setTimeout(() => (msg.textContent = ''), 3000);
+    renderExtensions();
+  }
 });
 
 // --- Clear browsing data ---

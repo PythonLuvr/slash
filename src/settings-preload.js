@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('settings', {
   addEngine: (label, url) => ipcRenderer.invoke('engine:add', { label, url }),
   removeEngine: (id) => ipcRenderer.invoke('engine:remove', id),
   clearData: (opts) => ipcRenderer.invoke('data:clear', opts),
+  extLoad: () => ipcRenderer.invoke('extensions:load'),
+  extList: () => ipcRenderer.invoke('extensions:list'),
+  extRemove: (id) => ipcRenderer.invoke('extensions:remove', id),
   // Migration (bookmarks / history / cookies) from another browser.
   migrateSources: () => ipcRenderer.invoke('migrate:sources'),
   migrateRun: (id, types) => ipcRenderer.invoke('migrate:run', { id, types }),
