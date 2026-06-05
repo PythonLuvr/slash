@@ -246,7 +246,29 @@ window.slash
   })
   .catch(() => {});
 window.slash.onSearchEngine((id) => setOmniEngine(id));
+window.slash.onSearchList((list) => {
+  if (Array.isArray(list)) omniEngines = list;
+});
 $('omni-engine').addEventListener('click', () => window.slash.togglePop('enginepick'));
+
+// "Add this site to search engines" button (OpenSearch auto-detect).
+const addEngineBtn = $('add-engine');
+window.slash.onAddEngine((info) => {
+  if (info && info.name) {
+    addEngineBtn.classList.remove('hidden');
+    addEngineBtn.title = 'Add ' + info.name + ' to your search engines';
+  } else {
+    addEngineBtn.classList.add('hidden');
+  }
+});
+addEngineBtn.addEventListener('click', async () => {
+  addEngineBtn.classList.add('hidden'); // optimistic
+  try {
+    await window.slash.addCurrentEngine();
+  } catch {
+    /* ignore */
+  }
+});
 
 // Toolbar avatar reflects the computer account (initial, or account picture).
 window.slash

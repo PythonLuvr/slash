@@ -76,6 +76,23 @@ document.addEventListener('click', onUserGesture, true);
 document.addEventListener('keydown', onUserGesture, true);
 
 // Offer to save on submit.
+// OpenSearch: if the page declares a search descriptor, tell main so the
+// toolbar can offer to add this site as a search engine.
+function reportOpenSearch() {
+  try {
+    const link = document.querySelector(
+      'link[rel~="search"][type="application/opensearchdescription+xml"][href]',
+    );
+    if (!link) return;
+    const href = new URL(link.getAttribute('href'), location.href).href;
+    ipcRenderer.send('opensearch:found', { href });
+  } catch {
+    /* ignore */
+  }
+}
+window.addEventListener('DOMContentLoaded', reportOpenSearch);
+window.addEventListener('load', reportOpenSearch);
+
 document.addEventListener(
   'submit',
   (e) => {

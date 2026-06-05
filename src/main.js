@@ -1,4 +1,4 @@
-const { app, BaseWindow, WebContentsView, ipcMain, Menu, session, shell, clipboard, dialog } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain, Menu, session, shell, clipboard, dialog, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -108,7 +108,7 @@ const POP_SIZES = {
   siteinfo: { w: 330, h: 264 },
   shield: { w: 268, h: 150 },
   setup: { w: 344, h: 440 },
-  enginepick: { w: 212, h: 162 },
+  enginepick: { w: 216, h: 344 },
 };
 
 // Top-right cluster popovers anchor right; site-info anchors under the omnibox;
@@ -157,10 +157,29 @@ const ENGINE_META = [
   { id: 'wikipedia', label: 'Wikipedia', domain: 'wikipedia.org' },
 ];
 
+// Custom (user-added) engines live in settings; each has a url template with
+// %s where the query goes. These helpers merge them with the built-ins.
+function customEngines() {
+  return (readSettings().customEngines || []).filter((c) => c && c.id && c.url);
+}
+function allEngineMeta() {
+  return ENGINE_META.concat(
+    customEngines().map((c) => ({ id: c.id, label: c.label, domain: c.domain, custom: true })),
+  );
+}
+function engineExists(id) {
+  return !!ENGINES[id] || customEngines().some((c) => c.id === id);
+}
+function buildSearchUrl(id, q) {
+  if (ENGINES[id]) return ENGINES[id](q);
+  const c = customEngines().find((x) => x.id === id);
+  if (c) return c.url.replace(/%s/g, encodeURIComponent(q));
+  return ENGINES.duckduckgo(q);
+}
+
 // The user's chosen default search engine (private DuckDuckGo by default).
 function searchURL(q) {
-  const eng = readSettings().searchEngine;
-  return (ENGINES[eng] || ENGINES.duckduckgo)(q);
+  return buildSearchUrl(readSettings().searchEngine, q);
 }
 
 // DNS-over-HTTPS so lookups are not readable by the network/ISP. 'secure'
@@ -787,7 +806,7 @@ function showPopover(kind) {
   if (kind === 'shield') sendShield();
   if (kind === 'setup') sendSetup();
   if (kind === 'enginepick') {
-    popoverView.webContents.send('enginepick', { current: readSettings().searchEngine, list: ENGINE_META });
+    popoverView.webContents.send('enginepick', { current: readSettings().searchEngine, list: allEngineMeta() });
   }
   popoverView.webContents.focus();
   popKind = kind;
@@ -798,6 +817,13 @@ function broadcastSearchEngine() {
   const cur = readSettings().searchEngine;
   if (chromeView) chromeView.webContents.send('search-engine', cur);
   if (heroView) heroView.webContents.send('search-engine', cur);
+}
+// The full engine set changed (custom engine added/removed): refresh the views
+// that hold a copy of the list so they can render new entries.
+function broadcastEngineList() {
+  const list = allEngineMeta();
+  if (chromeView) chromeView.webContents.send('search-list', list);
+  if (heroView) heroView.webContents.send('search-list', list);
 }
 
 // First-run setup picker: current default-browser status + importable sources.
@@ -896,6 +922,10 @@ function attachTabView(tab) {
   });
   wc.on('did-start-loading', () => {
     tab.blocked = 0;
+    // New page: forget any "add this site" offer until it re-declares one.
+    tab.pendingEngine = null;
+    tab.pendingEngineHref = null;
+    if (id === activeTabId) sendAddEngine();
     if (tab.failedHttp) {
       tab.failedHttp = null;
       if (id === activeTabId) updateContentVisibility();
@@ -973,6 +1003,7 @@ function activateTab(id) {
   sendState();
   sendTabs();
   sendBlocked();
+  sendAddEngine();
 }
 
 // --- Tab suspension (discarding) ---
@@ -1629,11 +1660,11 @@ ipcMain.on('pop:setup', () => showPopover('setup')); // open the import picker f
 // list = the full engine set (omnibox dropdown). favorites = the ordered subset
 // shown as quick-pick chips on the start page (user-customizable).
 ipcMain.handle('search:get', () => {
-  const fav = (readSettings().heroEngines || []).filter((id) => ENGINES[id]);
-  return { current: readSettings().searchEngine, list: ENGINE_META, favorites: fav };
+  const fav = (readSettings().heroEngines || []).filter((id) => engineExists(id));
+  return { current: readSettings().searchEngine, list: allEngineMeta(), favorites: fav };
 });
 ipcMain.on('search:set', (_e, id) => {
-  if (!ENGINES[id]) return;
+  if (!engineExists(id)) return;
   writeSettings({ searchEngine: id });
   broadcastSearchEngine();
   hidePopover();
@@ -1641,10 +1672,171 @@ ipcMain.on('search:set', (_e, id) => {
 // The start page (or settings) saves the quick-pick chips (add/remove/reorder).
 ipcMain.on('hero:engines-set', (_e, ids) => {
   if (!Array.isArray(ids)) return;
-  writeSettings({ heroEngines: ids.filter((id) => ENGINES[id]) });
+  writeSettings({ heroEngines: ids.filter((id) => engineExists(id)) });
   if (heroView) {
-    heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((id) => ENGINES[id]));
+    heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((id) => engineExists(id)));
   }
+});
+
+// Add a custom engine (name + url template with %s). Returns { ok, engine } or
+// { error }. The new engine then appears in the picker, settings, and the +.
+function addEngineInternal(label, url) {
+  label = String(label || '').trim();
+  url = String(url || '').trim().replace(/\{searchTerms\}|\{q\}/gi, '%s');
+  if (!label || !/^https?:\/\//i.test(url) || !/%s/.test(url)) {
+    return { error: 'Add a name and a URL with %s where the search term goes.' };
+  }
+  let domain = '';
+  try {
+    domain = new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return { error: 'That URL is not valid.' };
+  }
+  const existing = customEngines();
+  const base = 'custom-' + (label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'engine');
+  let id = base;
+  let n = 2;
+  while (ENGINES[id] || existing.some((c) => c.id === id)) id = base + '-' + n++;
+  const engine = { id, label, domain, url };
+  writeSettings({ customEngines: existing.concat([engine]) });
+  try {
+    favicons.remember('https://' + domain + '/favicon.ico', domain);
+  } catch {
+    /* best effort */
+  }
+  broadcastEngineList();
+  return { ok: true, engine: { id, label, domain, custom: true } };
+}
+ipcMain.handle('engine:add', (_e, { label, url } = {}) => addEngineInternal(label, url));
+
+// Remove a custom engine and clean up any references to it.
+ipcMain.handle('engine:remove', (_e, id) => {
+  const existing = customEngines();
+  if (!existing.some((c) => c.id === id)) return { error: 'not a custom engine' };
+  const s = readSettings();
+  const patch = { customEngines: existing.filter((c) => c.id !== id) };
+  if (s.searchEngine === id) patch.searchEngine = 'duckduckgo';
+  if ((s.heroEngines || []).includes(id)) patch.heroEngines = s.heroEngines.filter((x) => x !== id);
+  writeSettings(patch);
+  broadcastSearchEngine();
+  broadcastEngineList();
+  if (heroView) {
+    heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((x) => engineExists(x)));
+  }
+  return { ok: true };
+});
+
+// --- OpenSearch auto-detect: "add this site's search" from the URL bar ---
+// When a page declares an OpenSearch descriptor, we fetch it, parse the name +
+// HTML search template, and offer a one-click add in the toolbar.
+function fetchText(url, cap = 256 * 1024) {
+  return new Promise((resolve) => {
+    try {
+      const req = net.request(url);
+      const chunks = [];
+      let bytes = 0;
+      const to = setTimeout(() => {
+        try {
+          req.abort();
+        } catch {
+          /* ignore */
+        }
+        resolve('');
+      }, 6000);
+      req.on('response', (res) => {
+        if (res.statusCode >= 400) {
+          clearTimeout(to);
+          res.resume();
+          return resolve('');
+        }
+        res.on('data', (d) => {
+          bytes += d.length;
+          if (bytes > cap) {
+            try {
+              req.abort();
+            } catch {
+              /* ignore */
+            }
+          } else chunks.push(d);
+        });
+        res.on('end', () => {
+          clearTimeout(to);
+          resolve(Buffer.concat(chunks).toString('utf8'));
+        });
+      });
+      req.on('error', () => {
+        clearTimeout(to);
+        resolve('');
+      });
+      req.on('abort', () => {
+        clearTimeout(to);
+        resolve('');
+      });
+      req.end();
+    } catch {
+      resolve('');
+    }
+  });
+}
+function parseOpenSearch(xml) {
+  if (!xml) return null;
+  const name = (xml.match(/<ShortName>\s*([^<]+?)\s*<\/ShortName>/i) || [])[1] || '';
+  const tags = xml.match(/<Url\b[^>]*>/gi) || [];
+  let template = '';
+  for (const tag of tags) {
+    if (!/type\s*=\s*["']text\/html["']/i.test(tag)) continue;
+    const t = (tag.match(/template\s*=\s*["']([^"']+)["']/i) || [])[1];
+    if (t && /\{searchTerms\}/i.test(t)) {
+      template = t;
+      break;
+    }
+  }
+  if (!template) return null;
+  // Drop optional OpenSearch params, keep the query placeholder.
+  template = template.replace(/\{searchTerms\}/gi, '%s').replace(/\{[^}]*\}/g, '');
+  if (!/^https?:\/\//i.test(template) || !/%s/.test(template)) return null;
+  return { name: name.trim(), template };
+}
+
+function tabByContents(wc) {
+  return tabs.find((t) => t.view && t.view.webContents === wc) || null;
+}
+// Push the active tab's "add this site" state to the toolbar.
+function sendAddEngine() {
+  const at = activeTab();
+  const pe = at && at.pendingEngine ? at.pendingEngine : null;
+  if (chromeView) chromeView.webContents.send('add-engine', pe ? { name: pe.name } : null);
+}
+ipcMain.on('opensearch:found', async (e, { href } = {}) => {
+  const tab = tabByContents(e.sender);
+  if (!tab || !href || tab.pendingEngineHref === href) return;
+  tab.pendingEngineHref = href;
+  try {
+    const meta = parseOpenSearch(await fetchText(href));
+    if (!meta) return;
+    let domain = '';
+    try {
+      domain = new URL(meta.template).hostname.replace(/^www\./, '');
+    } catch {
+      return;
+    }
+    // Don't offer one we already have (built-in or custom) for this domain.
+    if (allEngineMeta().some((m) => m.domain === domain)) return;
+    tab.pendingEngine = { name: meta.name || domain, template: meta.template, domain };
+    if (tab.id === activeTabId) sendAddEngine();
+  } catch {
+    /* ignore */
+  }
+});
+ipcMain.handle('engine:add-current', () => {
+  const at = activeTab();
+  if (!at || !at.pendingEngine) return { error: 'nothing to add' };
+  const r = addEngineInternal(at.pendingEngine.name, at.pendingEngine.template);
+  if (r.ok) {
+    at.pendingEngine = null;
+    sendAddEngine();
+  }
+  return r;
 });
 
 // --- IPC: bookmarks ---
@@ -2116,13 +2308,12 @@ ipcMain.handle('settings:set', (_e, patch) => {
 
 // --- IPC: hero search + direct open (load into the active tab) ---
 ipcMain.on('hero:search', (_e, { engine, query }) => {
-  const make = ENGINES[engine] || ENGINES.duckduckgo;
   const at = activeTab();
   if (query && query.trim() && at) {
     at.onHero = false;
     at.onAIPage = false;
     settingsOpen = false;
-    at.view.webContents.loadURL(make(query.trim()));
+    at.view.webContents.loadURL(buildSearchUrl(engine, query.trim()));
     updateContentVisibility();
   }
 });

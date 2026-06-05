@@ -22,6 +22,12 @@
             <div class="desc">Every available engine. Set your default (used in the address bar) and star the ones that appear as quick picks on the start page.</div>
           </div>
           <div id="engines" class="engine-list"></div>
+          <div class="engine-add-form">
+            <input id="ce-name" type="text" placeholder="Name (e.g. Pinterest)" autocomplete="off" spellcheck="false" />
+            <input id="ce-url" type="text" placeholder="Search URL with %s  (e.g. https://www.pinterest.com/search/pins/?q=%s)" autocomplete="off" spellcheck="false" />
+            <button id="ce-add" class="btn" type="button">Add your own</button>
+          </div>
+          <div id="ce-msg" class="ce-msg"></div>
         </div>
       </section>
 

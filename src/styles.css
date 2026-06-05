@@ -271,6 +271,26 @@
   padding: 0;
 }
 
+/* "Add this site to search engines" button (appears on OpenSearch sites). */
+.add-engine {
+  position: relative;
+  color: var(--accent);
+}
+
+.add-engine .ae-ico {
+  font-size: 13px;
+}
+
+.add-engine .ae-plus {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+}
+
 /* Omnibox search-engine picker button (left of the address field). */
 .omni-engine {
   display: inline-flex;

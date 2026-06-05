@@ -145,6 +145,36 @@ body {
   color: var(--faint);
 }
 
+/* Search-engine picker (omnibox dropdown): header fixed, list scrolls. */
+#enginepick {
+  position: absolute;
+  inset: 5px;
+  display: flex;
+  flex-direction: column;
+}
+
+#ep-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ep-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+.ep-row.ep-manage {
+  color: var(--muted);
+  font-size: 12.5px;
+  justify-content: flex-start;
+}
+
+.ep-row.ep-manage:hover {
+  color: var(--ink);
+}
+
 /* Search-engine picker rows */
 .ep-row {
   display: flex;

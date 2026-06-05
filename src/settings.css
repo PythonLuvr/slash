@@ -319,6 +319,68 @@ section h2 {
   color: var(--accent);
 }
 
+.erow-del {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.erow-del:hover {
+  background: rgba(240, 138, 138, 0.14);
+  color: #f08a8a;
+}
+
+/* Add-your-own form */
+.engine-add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.engine-add-form #ce-name {
+  flex: 0 0 150px;
+}
+
+.engine-add-form #ce-url {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.engine-add-form input {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.engine-add-form input:focus {
+  border-color: var(--accent);
+}
+
+.ce-msg {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 14px;
+}
+
+.ce-msg.err {
+  color: #f08a8a;
+}
+
 /* Stacked rows: label on top, control block below (migration). */
 .row.col {
   flex-direction: column;

@@ -272,6 +272,21 @@ body {
   background: rgba(240, 138, 138, 0.12);
 }
 
+.ea-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+.ea-row.ea-manage {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.ea-row.ea-manage:hover {
+  color: var(--ink);
+}
+
 /* AI model pills (shown in Ask AI mode, same row position as engines) */
 #models {
   display: flex;

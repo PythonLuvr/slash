@@ -76,6 +76,16 @@ window.overlay.onEnginepick(({ current, list }) => {
     row.addEventListener('click', () => window.overlay.setSearchEngine(e.id));
     wrap.appendChild(row);
   }
+  // Footer: open the full manager (all engines + add your own).
+  const sep = document.createElement('div');
+  sep.className = 'ep-sep';
+  wrap.appendChild(sep);
+  const manage = document.createElement('button');
+  manage.type = 'button';
+  manage.className = 'ep-row ep-manage';
+  manage.textContent = 'Add or manage engines';
+  manage.addEventListener('click', () => window.overlay.openSettingsPage('search'));
+  wrap.appendChild(manage);
 });
 
 // Memory + tab readout in the menu footer (efficiency you can see).

@@ -38,4 +38,7 @@ contextBridge.exposeInMainWorld('slash', {
   profile: () => ipcRenderer.invoke('profile:get'),
   searchGet: () => ipcRenderer.invoke('search:get'),
   onSearchEngine: (cb) => ipcRenderer.on('search-engine', (_e, id) => cb(id)),
+  onSearchList: (cb) => ipcRenderer.on('search-list', (_e, list) => cb(list)),
+  onAddEngine: (cb) => ipcRenderer.on('add-engine', (_e, info) => cb(info)),
+  addCurrentEngine: () => ipcRenderer.invoke('engine:add-current'),
 });

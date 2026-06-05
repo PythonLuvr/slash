@@ -125,21 +125,18 @@ function renderEngines() {
     enginesEl.appendChild(chip);
   }
 
-  // "+" chip: add an engine that is not already a quick pick.
-  const remaining = SOURCES.filter((s) => !favorites.includes(s.id));
-  if (remaining.length) {
-    const add = document.createElement('button');
-    add.type = 'button';
-    add.className = 'echip echip-add';
-    add.title = 'Add a search engine';
-    add.setAttribute('aria-label', 'Add a search engine');
-    add.textContent = '+';
-    add.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openEngineAdd(add, remaining);
-    });
-    enginesEl.appendChild(add);
-  }
+  // "+" chip: add engines to the quick picks, add your own, or manage them all.
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'echip echip-add';
+  add.title = 'Add or manage search engines';
+  add.setAttribute('aria-label', 'Add or manage search engines');
+  add.textContent = '+';
+  add.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openEngineAdd(add, SOURCES.filter((s) => !favorites.includes(s.id)));
+  });
+  enginesEl.appendChild(add);
 }
 
 // Small popup listing engines that can be added to the quick picks.
@@ -173,6 +170,20 @@ function openEngineAdd(anchor, remaining) {
     });
     menu.appendChild(row);
   }
+  // Footer: add your own engine, or open the full manager (all engines).
+  const sep = document.createElement('div');
+  sep.className = 'ea-sep';
+  menu.appendChild(sep);
+  const manage = document.createElement('button');
+  manage.type = 'button';
+  manage.className = 'ea-row ea-manage';
+  manage.textContent = 'Add your own / manage engines';
+  manage.addEventListener('click', () => {
+    closeEngineAdd();
+    window.hero.openSettings('search');
+  });
+  menu.appendChild(manage);
+
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
   menu.style.left = Math.round(r.left) + 'px';
@@ -538,6 +549,14 @@ window.hero.onHeroEngines((ids) => {
   const v = ids.filter((id) => metaOf(id));
   if (v.length) {
     favorites = v;
+    renderEngines();
+  }
+});
+// The full engine set changed (a custom engine was added or removed).
+window.hero.onSearchList((list) => {
+  if (Array.isArray(list) && list.length) {
+    SOURCES = list;
+    favorites = favorites.filter((id) => metaOf(id));
     renderEngines();
   }
 });

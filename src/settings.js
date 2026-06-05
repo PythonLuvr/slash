@@ -289,9 +289,58 @@ function renderEngines() {
     });
     row.appendChild(star);
 
+    // Custom engines can be deleted.
+    if (e.custom) {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'erow-del';
+      del.title = 'Delete engine';
+      del.setAttribute('aria-label', 'Delete ' + e.label);
+      del.innerHTML = '&#10005;';
+      del.addEventListener('click', async () => {
+        await window.settings.removeEngine(e.id);
+        await refreshEngines();
+      });
+      row.appendChild(del);
+    }
+
     wrap.appendChild(row);
   }
 }
+
+// Re-pull the engine list + favorites after add/remove, without scrolling.
+async function refreshEngines() {
+  try {
+    const r = await window.settings.searchGet();
+    if (r && Array.isArray(r.list)) ENGINES = r.list;
+    if (r && Array.isArray(r.favorites)) heroFavs = r.favorites.slice();
+    current = await window.settings.get();
+  } catch {
+    /* ignore */
+  }
+  renderEngines();
+}
+
+async function addCustomEngine() {
+  const msg = $('ce-msg');
+  const label = $('ce-name').value.trim();
+  const url = $('ce-url').value.trim();
+  const r = await window.settings.addEngine(label, url);
+  if (r && r.error) {
+    msg.textContent = r.error;
+    msg.classList.add('err');
+    return;
+  }
+  msg.textContent = '';
+  msg.classList.remove('err');
+  $('ce-name').value = '';
+  $('ce-url').value = '';
+  await refreshEngines();
+}
+$('ce-add').addEventListener('click', addCustomEngine);
+$('ce-url').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') addCustomEngine();
+});
 
 function renderToggles() {
   for (const row of document.querySelectorAll('.toggle-row')) {

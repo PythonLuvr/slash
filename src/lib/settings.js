@@ -32,6 +32,7 @@ const DEFAULTS = {
   accent: '#f1cb53', // themeable UI accent (soft yellow default)
   searchEngine: 'duckduckgo', // private search by default
   heroEngines: ['duckduckgo', 'startpage', 'brave'], // start-page quick picks (ordered)
+  customEngines: [], // user-added engines: { id, label, domain, url(with %s) }
   doh: true, // DNS-over-HTTPS on by default
   httpsOnly: true, // upgrade http -> https, warn on failure
   blockAds: true, // EasyList/EasyPrivacy tracker + ad blocking
@@ -102,6 +103,7 @@ function readSettings() {
       accent: parsed.accent || DEFAULTS.accent,
       searchEngine: parsed.searchEngine || DEFAULTS.searchEngine,
       heroEngines: Array.isArray(parsed.heroEngines) ? parsed.heroEngines : DEFAULTS.heroEngines,
+      customEngines: Array.isArray(parsed.customEngines) ? parsed.customEngines : DEFAULTS.customEngines,
       doh: typeof parsed.doh === 'boolean' ? parsed.doh : DEFAULTS.doh,
       httpsOnly: typeof parsed.httpsOnly === 'boolean' ? parsed.httpsOnly : DEFAULTS.httpsOnly,
       blockAds: typeof parsed.blockAds === 'boolean' ? parsed.blockAds : DEFAULTS.blockAds,
@@ -124,6 +126,7 @@ function writeSettings(patch) {
     accent: patch.accent || cur.accent,
     searchEngine: patch.searchEngine || cur.searchEngine,
     heroEngines: Array.isArray(patch.heroEngines) ? patch.heroEngines : cur.heroEngines,
+    customEngines: Array.isArray(patch.customEngines) ? patch.customEngines : cur.customEngines,
     doh: typeof patch.doh === 'boolean' ? patch.doh : cur.doh,
     httpsOnly: typeof patch.httpsOnly === 'boolean' ? patch.httpsOnly : cur.httpsOnly,
     blockAds: typeof patch.blockAds === 'boolean' ? patch.blockAds : cur.blockAds,

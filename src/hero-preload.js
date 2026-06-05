@@ -14,5 +14,7 @@ contextBridge.exposeInMainWorld('hero', {
   setHeroEngines: (ids) => ipcRenderer.send('hero:engines-set', ids),
   onSearchEngine: (cb) => ipcRenderer.on('search-engine', (_e, id) => cb(id)),
   onHeroEngines: (cb) => ipcRenderer.on('hero-engines', (_e, ids) => cb(ids)),
+  onSearchList: (cb) => ipcRenderer.on('search-list', (_e, list) => cb(list)),
+  openSettings: (section) => ipcRenderer.send('settings:open', section),
   onAddDial: (cb) => ipcRenderer.on('hero:add-dial', (_e, d) => cb(d)),
 });
