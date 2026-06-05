@@ -92,6 +92,9 @@ function browserRoots() {
     { id: 'brave', name: 'Brave', userDataDir: path.join(LA, 'BraveSoftware/Brave-Browser/User Data') },
     { id: 'vivaldi', name: 'Vivaldi', userDataDir: path.join(LA, 'Vivaldi/User Data') },
     { id: 'opera', name: 'Opera', userDataDir: path.join(AD, 'Opera Software/Opera Stable') },
+    { id: 'operagx', name: 'Opera GX', userDataDir: path.join(AD, 'Opera Software/Opera GX Stable') },
+    { id: 'chromium', name: 'Chromium', userDataDir: path.join(LA, 'Chromium/User Data') },
+    { id: 'yandex', name: 'Yandex', userDataDir: path.join(LA, 'Yandex/YandexBrowser/User Data') },
   ];
 }
 
