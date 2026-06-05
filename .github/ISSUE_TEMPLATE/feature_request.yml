@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest an idea or improvement for Slash
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is the problem or use case
+      description: What are you trying to do that Slash makes hard or impossible today?
+      placeholder: I often ... but Slash ...
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like to see
+      description: Describe the feature or change. Sketches and examples welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+      description: Other ways to solve this, or how other browsers handle it.
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Fit with Slash
+      description: Slash is private-by-default and local-first. Check any that apply.
+      options:
+        - label: This keeps data on the user's machine (no new cloud dependency).
+        - label: This is optional / does not change defaults for everyone.
