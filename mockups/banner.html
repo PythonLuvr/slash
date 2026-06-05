@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Slash banner</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap');
+      :root {
+        --paper: #1c1c1f;
+        --ink: #e8e8ec;
+        --muted: #9a9aa3;
+        --accent: #f1cb53;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { width: 1280px; height: 640px; overflow: hidden; }
+      body {
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 50% 122%, rgba(241, 203, 83, 0.16), transparent 58%),
+          radial-gradient(circle at 50% -10%, rgba(255, 255, 255, 0.03), transparent 45%),
+          linear-gradient(180deg, #1a1a1d 0%, #111113 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 30px;
+        position: relative;
+        -webkit-font-smoothing: antialiased;
+      }
+      /* faint corner border for framing */
+      body::after {
+        content: '';
+        position: absolute;
+        inset: 26px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 22px;
+        pointer-events: none;
+      }
+      .logo {
+        width: 124px;
+        height: 124px;
+        border-radius: 30px;
+        box-shadow: 0 18px 50px rgba(241, 203, 83, 0.18), 0 4px 14px rgba(0, 0, 0, 0.4);
+      }
+      .wordmark {
+        font-family: 'Space Grotesk', system-ui, sans-serif;
+        font-size: 116px;
+        font-weight: 500;
+        letter-spacing: -3px;
+        line-height: 1;
+        display: flex;
+        align-items: baseline;
+      }
+      .wordmark .sl { color: var(--accent); font-weight: 700; }
+      .tagline {
+        font-size: 25px;
+        color: var(--muted);
+        letter-spacing: 0.2px;
+        text-align: center;
+      }
+      .tagline b { color: var(--ink); font-weight: 600; }
+      .pills { display: flex; gap: 12px; margin-top: 6px; }
+      .pill {
+        font-size: 14px;
+        color: var(--muted);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        padding: 7px 16px;
+      }
+      .pill.acc { color: var(--accent); border-color: rgba(241, 203, 83, 0.4); }
+    </style>
+  </head>
+  <body>
+    <img class="logo" src="../build/icon.png" alt="" />
+    <div class="wordmark"><span class="sl">/</span>slash</div>
+    <div class="tagline">An <b>AI-native</b>, <b>private-by-default</b> web browser</div>
+    <div class="pills">
+      <span class="pill acc">AI built in</span>
+      <span class="pill">Private by default</span>
+      <span class="pill">Open source</span>
+    </div>
+  </body>
+</html>
