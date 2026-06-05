@@ -311,6 +311,24 @@ window.slash
   })
   .catch(() => {});
 
+// Profile cue: non-default profiles show a colored name pill and tint the avatar
+// ring, so you can tell which profile a window belongs to.
+window.slash.onProfileWindow((p) => {
+  const badge = $('profile-badge');
+  const av = document.querySelector('#profile .avatar');
+  if (p && !p.isDefault) {
+    if (badge) {
+      badge.textContent = p.name || 'Profile';
+      badge.style.background = p.color || '#f1cb53';
+      badge.classList.remove('hidden');
+    }
+    if (av) av.style.boxShadow = '0 0 0 2px ' + (p.color || '#f1cb53');
+  } else {
+    if (badge) badge.classList.add('hidden');
+    if (av) av.style.boxShadow = '';
+  }
+});
+
 // Generic infobar strip (main controls the chrome height so it pushes content
 // down rather than overlapping it). Used by the first-run default-browser
 // prompt and update notifications.

@@ -1501,6 +1501,13 @@ function createBrowserWindow(opts = {}) {
   });
 
   S.win.on('closed', () => {
+    // Capture this window's tabs first (so the last window restores next launch),
+    // flushing any pending debounced save.
+    if (sessionSaveTimer) {
+      clearTimeout(sessionSaveTimer);
+      sessionSaveTimer = null;
+    }
+    saveSession();
     const i = windows.indexOf(W);
     if (i !== -1) windows.splice(i, 1);
     for (const t of W.tabs) {
@@ -1510,6 +1517,7 @@ function createBrowserWindow(opts = {}) {
         /* ignore */
       }
     }
+    saveSession(); // persist the remaining open windows (no-op if none, see guard)
     if (focusedW === W) focusedW = windows[0] || null;
     if (S === W) useWindow(focusedW);
   });
@@ -1543,6 +1551,10 @@ function sessionForWindow(W) {
 function saveSession() {
   try {
     const list = windows.map(sessionForWindow).filter((w) => w.tabs.length);
+    // Never clobber a good session with nothing: closing the last window removes
+    // it from windows[] before before-quit fires, so an empty save here would
+    // erase what you had open. Keep the last non-empty snapshot instead.
+    if (!list.length) return;
     fs.writeFileSync(sessionPath(), JSON.stringify({ windows: list }), 'utf8');
   } catch {
     /* best effort */

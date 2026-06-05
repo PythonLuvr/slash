@@ -513,3 +513,24 @@
   font-size: 12px;
   padding: 0 6px;
 }
+
+/* Profile cue in the toolbar (non-default profiles) */
+.profile-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  margin: 0 2px;
+  border-radius: 11px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #18181b;
+  white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 0 auto;
+}
+.profile-badge.hidden {
+  display: none;
+}

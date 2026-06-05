@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('slash', {
   openUrl: (url) => ipcRenderer.send('hero:open', { url }),
   // events
   onState: (cb) => ipcRenderer.on('state', (_e, state) => cb(state)),
+  onProfileWindow: (cb) => ipcRenderer.on('profile-window', (_e, p) => cb(p)),
   onTabs: (cb) => ipcRenderer.on('tabs', (_e, list) => cb(list)),
   onBookmarks: (cb) => ipcRenderer.on('bookmarks', (_e, list) => cb(list)),
   onFocusOmnibox: (cb) => ipcRenderer.on('focus-omnibox', () => cb()),
