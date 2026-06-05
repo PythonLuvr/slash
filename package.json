@@ -8,7 +8,8 @@
     "start": "node launch.js",
     "icon": "node scripts/make-icon.js",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder --publish never",
+    "release": "electron-builder --publish always"
   },
   "author": "EJ Redd",
   "license": "MIT",
