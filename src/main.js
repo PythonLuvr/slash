@@ -59,8 +59,6 @@ const TOOLBAR_HEIGHT = 56;
 const BOOKMARKS_HEIGHT = 34;
 const INFOBAR_HEIGHT = 40;
 const BASE_CHROME = TABSTRIP_HEIGHT + TOOLBAR_HEIGHT + BOOKMARKS_HEIGHT;
-let CHROME_HEIGHT = BASE_CHROME; // grows by INFOBAR_HEIGHT while an infobar shows
-let infobarOpen = false;
 const FIND_W = 360;
 const FIND_HEIGHT = 44;
 const AI_WIDTH = 400;
@@ -84,26 +82,10 @@ const SECURE_PREFS = {
 let AI_CWD = null;
 
 let win;
-let chromeView; // tab strip + toolbar + bookmarks (trusted)
-let heroView; // shared start page, shown for any tab that has not navigated
-let aiView; // docked AI panel (trusted)
-let aiPageView; // full-screen slash://ai conversation (trusted, content area)
-let popoverView; // top-right menu / profile / downloads / history layer (trusted)
-let findView; // find-in-page bar (trusted), shown on Ctrl+F
-let ctxView; // right-click context menu layer (trusted)
-let permView; // permission prompt bubble (trusted)
-let interstitialView; // HTTPS-only failure interstitial (trusted, content area)
-let settingsView; // full-page settings surface (trusted, content area)
-let settingsOpen = false;
-let popKind = null; // which popover is open, or null
-let findOpen = false;
-let findText = '';
-let ctxOpen = false;
-let ctxParams = null; // params from the last 'context-menu' event
-let permActive = null; // current { origin, permission, callback }
-const permQueue = []; // pending permission requests
-let httpsOnly = true; // mirrors settings.httpsOnly
-const upgraded = new Map(); // upgraded https url -> original http url
+// Per-window views + UI state now live on the window context W (see
+// createBrowserWindow) and are referenced as S.S.chromeView, S.S.settingsOpen, etc.
+let httpsOnly = true; // mirrors settings.httpsOnly (app-level, shared)
+const upgraded = new Map(); // upgraded https url -> original http url (shared)
 
 // Popover sizes (the view is sized to the card).
 const POP_SIZES = {
@@ -117,32 +99,28 @@ const POP_SIZES = {
   enginepick: { w: 216, h: 344 },
   tabmenu: { w: 188, h: 172 },
 };
-let tabMenuTarget = null; // tab id the tab context menu acts on
-let tabMenuPos = { x: 0, y: 0 };
 
 // Top-right cluster popovers anchor right; site-info anchors under the omnibox;
 // the first-run setup picker centers under the toolbar.
 function popoverPos(kind, s, width) {
-  if (kind === 'setup') return { x: Math.max(10, Math.round((width - s.w) / 2)), y: CHROME_HEIGHT };
+  if (kind === 'setup') return { x: Math.max(10, Math.round((width - s.w) / 2)), y: S.CHROME_HEIGHT };
   // The engine picker drops under its button at the left of the omnibox.
-  if (kind === 'enginepick') return { x: OMNIBOX_LEFT, y: CHROME_HEIGHT };
+  if (kind === 'enginepick') return { x: OMNIBOX_LEFT, y: S.CHROME_HEIGHT };
   // The tab context menu opens at the cursor (clamped to the window).
   if (kind === 'tabmenu') {
-    return { x: Math.max(6, Math.min(tabMenuPos.x, width - s.w - 6)), y: Math.max(CHROME_HEIGHT - 4, tabMenuPos.y) };
+    return { x: Math.max(6, Math.min(S.tabMenuPos.x, width - s.w - 6)), y: Math.max(S.CHROME_HEIGHT - 4, S.tabMenuPos.y) };
   }
   const x = kind === 'siteinfo' ? 12 : Math.max(0, width - s.w - 10);
-  return { x, y: CHROME_HEIGHT };
+  return { x, y: S.CHROME_HEIGHT };
 }
 // Approximate x of the omnibox's left edge (after home/back/forward/reload),
 // where the search-engine button sits. Tunable if the toolbar spacing changes.
 const OMNIBOX_LEFT = 150;
 
 // Tab model. Each tab owns a WebContentsView (untrusted web content). A tab
-// with `onHero: true` shows the shared heroView instead of its own page.
-let tabs = []; // { id, view, title, url, favicon, onHero, canGoBack, canGoForward, loading }
-let activeTabId = null;
-let tabSeq = 0;
-const closedStack = [];
+// with `onHero: true` shows the shared S.heroView instead of its own page.
+let tabs = []; // { id, view, title, url, favicon, onHero, ... } (per-window; moves onto W next batch)
+// S.activeTabId / S.tabSeq / S.closedStack now live on the window context S.
 
 // Multi-window registry. During the multi-window refactor each browser window is
 // represented by a context object W (see createBrowserWindow). Phase 1 still keeps
@@ -150,13 +128,17 @@ const closedStack = [];
 // move that state onto W and thread it through the per-window functions.
 const windows = [];
 let focusedW = null;
+// S is the active window context: the W whose per-window state the per-window
+// functions read/write. Phase 1 has one window so S is always it; step 1.3 sets
+// S per IPC/event so windows become independent.
+let S = null;
 function focusedWindow() {
   if (focusedW && windows.includes(focusedW)) return focusedW;
   return windows.find((W) => W.win && !W.win.isDestroyed() && W.win.isFocused()) || windows[0] || null;
 }
 
 function activeTab() {
-  return tabs.find((t) => t.id === activeTabId) || null;
+  return tabs.find((t) => t.id === S.activeTabId) || null;
 }
 
 const ENGINES = {
@@ -333,13 +315,13 @@ function onRequestBlocked(request) {
   });
   if (!tab) return;
   tab.blocked = (tab.blocked || 0) + 1;
-  if (tab.id === activeTabId) sendBlocked();
+  if (tab.id === S.activeTabId) sendBlocked();
 }
 
 function sendBlocked() {
-  if (!chromeView) return;
+  if (!S.chromeView) return;
   const at = activeTab();
-  chromeView.webContents.send('blocked', {
+  S.chromeView.webContents.send('blocked', {
     count: at ? at.blocked || 0 : 0,
     enabled: readSettings().blockAds,
   });
@@ -396,36 +378,36 @@ function clearPrivateSession() {
 }
 
 function enqueuePermission(req) {
-  permQueue.push(req);
-  if (!permActive) showNextPermission();
+  S.permQueue.push(req);
+  if (!S.permActive) showNextPermission();
 }
 
 function showNextPermission() {
-  permActive = permQueue.shift() || null;
-  if (!permActive) {
-    if (permView) permView.setVisible(false);
+  S.permActive = S.permQueue.shift() || null;
+  if (!S.permActive) {
+    if (S.permView) S.permView.setVisible(false);
     return;
   }
-  if (!permView) return;
+  if (!S.permView) return;
   const { width } = win.getContentBounds();
-  permView.setBounds({ x: 12, y: CHROME_HEIGHT + 6, width: Math.min(PERM_W, width - 24), height: PERM_H });
-  permView.setVisible(true);
-  win.contentView.removeChildView(permView);
-  win.contentView.addChildView(permView); // topmost
-  permView.webContents.send('perm:show', { origin: permActive.origin, action: permActive.label });
-  permView.webContents.focus();
+  S.permView.setBounds({ x: 12, y: S.CHROME_HEIGHT + 6, width: Math.min(PERM_W, width - 24), height: PERM_H });
+  S.permView.setVisible(true);
+  win.contentView.removeChildView(S.permView);
+  win.contentView.addChildView(S.permView); // topmost
+  S.permView.webContents.send('perm:show', { origin: S.permActive.origin, action: S.permActive.label });
+  S.permView.webContents.focus();
 }
 
 function decidePermission(allow) {
-  if (!permActive) return;
-  const { origin, permission, callback } = permActive;
+  if (!S.permActive) return;
+  const { origin, permission, callback } = S.permActive;
   store.setPermission(origin, permission, allow ? 'allow' : 'block');
   try {
     callback(!!allow);
   } catch {
     /* request already gone */
   }
-  permActive = null;
+  S.permActive = null;
   showNextPermission();
 }
 
@@ -459,7 +441,7 @@ const SYSTEM =
   'bookmark pages, and add sites to the start page. Use them when they help. ' +
   'Do not use file, terminal, or code-editing tools.';
 
-let aiOpen = false;
+// S.aiOpen now lives on the window context S.
 
 function normalizeInput(input) {
   const text = (input || '').trim();
@@ -505,15 +487,15 @@ async function applyAccent(view) {
   }
 }
 function broadcastAccent() {
-  for (const v of [chromeView, heroView, interstitialView, settingsView, aiPageView, aiView, popoverView, findView, ctxView, permView]) applyAccent(v);
+  for (const v of [S.chromeView, S.heroView, S.interstitialView, S.settingsView, S.aiPageView, S.aiView, S.popoverView, S.findView, S.ctxView, S.permView]) applyAccent(v);
 }
 
 // --- Downloads ---
 const downloads = [];
 let dlSeq = 0;
 function sendDownloads() {
-  if (!popoverView) return;
-  popoverView.webContents.send(
+  if (!S.popoverView) return;
+  S.popoverView.webContents.send(
     'downloads',
     downloads.map((d) => ({ id: d.id, name: d.name, state: d.state, received: d.received, total: d.total })),
   );
@@ -548,14 +530,14 @@ function securityOf(at) {
 
 // --- State to the chrome UI ---
 function sendState() {
-  if (!chromeView) return;
+  if (!S.chromeView) return;
   const at = activeTab();
   const onHero = !!(at && at.onHero);
   const onAIPage = !!(at && at.onAIPage);
   const realPage = at && !onHero && !onAIPage;
-  chromeView.webContents.send('state', {
+  S.chromeView.webContents.send('state', {
     mode: onAIPage ? 'aipage' : onHero ? 'hero' : 'page',
-    aiOpen,
+    aiOpen: S.aiOpen,
     url: onAIPage ? 'slash://ai' : realPage ? at.view.webContents.getURL() : '',
     title: onAIPage ? 'Slash AI' : at ? at.title : 'Slash',
     canGoBack: at ? at.canGoBack : false,
@@ -567,14 +549,14 @@ function sendState() {
 }
 
 function sendTabs() {
-  if (!chromeView) return;
-  chromeView.webContents.send(
+  if (!S.chromeView) return;
+  S.chromeView.webContents.send(
     'tabs',
     tabs.map((t) => ({
       id: t.id,
       title: t.onHero ? 'New tab' : t.title || t.url || 'Loading',
       favicon: t.onHero ? null : t.favicon,
-      active: t.id === activeTabId,
+      active: t.id === S.activeTabId,
       loading: t.loading,
       suspended: !!t.suspended,
       pinned: !!t.pinned,
@@ -605,26 +587,26 @@ function closeOtherTabs(id) {
 // --- Layout / visibility ---
 function layout() {
   const { width, height } = win.getContentBounds();
-  chromeView.setBounds({ x: 0, y: 0, width, height: CHROME_HEIGHT });
-  const top = CHROME_HEIGHT;
-  const ch = Math.max(0, height - CHROME_HEIGHT);
-  const aiW = aiOpen ? Math.min(AI_WIDTH, Math.floor(width * 0.5)) : 0;
+  S.chromeView.setBounds({ x: 0, y: 0, width, height: S.CHROME_HEIGHT });
+  const top = S.CHROME_HEIGHT;
+  const ch = Math.max(0, height - S.CHROME_HEIGHT);
+  const aiW = S.aiOpen ? Math.min(AI_WIDTH, Math.floor(width * 0.5)) : 0;
   const mainW = Math.max(0, width - aiW);
-  heroView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  if (interstitialView) interstitialView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  if (settingsView) settingsView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  if (aiPageView) aiPageView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  S.heroView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  if (S.interstitialView) S.interstitialView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  if (S.settingsView) S.settingsView.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  if (S.aiPageView) S.aiPageView.setBounds({ x: 0, y: top, width: mainW, height: ch });
   for (const t of tabs) if (t.view) t.view.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
-  if (popKind && popoverView) {
-    const s = POP_SIZES[popKind];
-    const { x, y } = popoverPos(popKind, s, width);
-    popoverView.setBounds({ x, y, width: s.w, height: s.h });
+  S.aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
+  if (S.popKind && S.popoverView) {
+    const s = POP_SIZES[S.popKind];
+    const { x, y } = popoverPos(S.popKind, s, width);
+    S.popoverView.setBounds({ x, y, width: s.w, height: s.h });
   }
-  if (findOpen && findView) {
-    findView.setBounds({
+  if (S.findOpen && S.findView) {
+    S.findView.setBounds({
       x: Math.max(0, width - aiW - FIND_W - 16),
-      y: CHROME_HEIGHT + 8,
+      y: S.CHROME_HEIGHT + 8,
       width: FIND_W,
       height: FIND_HEIGHT,
     });
@@ -633,10 +615,10 @@ function layout() {
 
 function updateContentVisibility() {
   const at = activeTab();
-  if (settingsView) settingsView.setVisible(settingsOpen);
-  const onInt = !settingsOpen && !!(at && at.failedHttp);
-  if (interstitialView) {
-    interstitialView.setVisible(onInt);
+  if (S.settingsView) S.settingsView.setVisible(S.settingsOpen);
+  const onInt = !S.settingsOpen && !!(at && at.failedHttp);
+  if (S.interstitialView) {
+    S.interstitialView.setVisible(onInt);
     if (onInt) {
       let host = '';
       try {
@@ -644,13 +626,13 @@ function updateContentVisibility() {
       } catch {
         /* keep blank */
       }
-      interstitialView.webContents.send('interstitial', { url: at.failedHttp, host });
+      S.interstitialView.webContents.send('interstitial', { url: at.failedHttp, host });
     }
   }
-  const onAIPage = !settingsOpen && !onInt && !!(at && at.onAIPage);
-  if (aiPageView) aiPageView.setVisible(onAIPage);
-  const onContent = settingsOpen || onInt || onAIPage;
-  heroView.setVisible(!onContent && !!at && at.onHero);
+  const onAIPage = !S.settingsOpen && !onInt && !!(at && at.onAIPage);
+  if (S.aiPageView) S.aiPageView.setVisible(onAIPage);
+  const onContent = S.settingsOpen || onInt || onAIPage;
+  S.heroView.setVisible(!onContent && !!at && at.onHero);
   for (const t of tabs) if (t.view) t.view.setVisible(!onContent && !!at && t.id === at.id && !at.onHero);
 }
 
@@ -659,32 +641,32 @@ function goAIPage(opts = {}) {
   if (!at) return;
   at.onAIPage = true;
   at.onHero = false;
-  settingsOpen = false;
+  S.settingsOpen = false;
   updateContentVisibility();
   sendState();
   sendTabs();
-  if (opts.prompt) aiPageView.webContents.send('ai:prompt', opts.prompt);
-  if (opts.load) aiPageView.webContents.send('ai:load', opts.load);
-  aiPageView.webContents.focus();
+  if (opts.prompt) S.aiPageView.webContents.send('ai:prompt', opts.prompt);
+  if (opts.load) S.aiPageView.webContents.send('ai:load', opts.load);
+  S.aiPageView.webContents.focus();
 }
 
 function openSettingsPage(section) {
-  settingsOpen = true;
-  if (settingsView) settingsView.webContents.send('settings:show', typeof section === 'string' ? section : null);
+  S.settingsOpen = true;
+  if (S.settingsView) S.settingsView.webContents.send('settings:show', typeof section === 'string' ? section : null);
   updateContentVisibility();
-  if (settingsView) settingsView.webContents.focus();
+  if (S.settingsView) S.settingsView.webContents.focus();
 }
 
 function closeSettingsPage() {
-  if (!settingsOpen) return;
-  settingsOpen = false;
+  if (!S.settingsOpen) return;
+  S.settingsOpen = false;
   updateContentVisibility();
 }
 
 // Keep the toolbar and AI panel above all tab content. Remove-then-add so a
 // re-stack can never duplicate a child view.
 function raiseChrome() {
-  for (const v of [aiView, chromeView, popoverView, findView, ctxView, permView]) {
+  for (const v of [S.aiView, S.chromeView, S.popoverView, S.findView, S.ctxView, S.permView]) {
     if (!v) continue;
     win.contentView.removeChildView(v);
     win.contentView.addChildView(v);
@@ -693,14 +675,14 @@ function raiseChrome() {
 
 // --- Find-in-page ---
 function showFind() {
-  findOpen = true;
+  S.findOpen = true;
   layout();
-  findView.setVisible(true);
-  findView.webContents.focus();
+  S.findView.setVisible(true);
+  S.findView.webContents.focus();
 }
 function hideFind() {
-  findOpen = false;
-  if (findView) findView.setVisible(false);
+  S.findOpen = false;
+  if (S.findView) S.findView.setVisible(false);
   const at = activeTab();
   if (at) at.view.webContents.stopFindInPage('clearSelection');
 }
@@ -758,33 +740,33 @@ function buildContextMenu(p) {
 }
 
 function showContext(params) {
-  if (!ctxView) return;
-  ctxParams = params;
+  if (!S.ctxView) return;
+  S.ctxParams = params;
   const items = buildContextMenu(params);
   let h = CTX_FRAME;
   for (const it of items) h += it.sep ? CTX_SEP : CTX_ROW;
   const { width, height } = win.getContentBounds();
-  // params.x/y are relative to the page view, which sits at (0, CHROME_HEIGHT).
+  // params.x/y are relative to the page view, which sits at (0, S.CHROME_HEIGHT).
   let x = Math.max(4, Math.min(params.x, width - CTX_WIDTH - 4));
-  let y = Math.max(CHROME_HEIGHT + 4, Math.min(params.y + CHROME_HEIGHT, height - h - 4));
-  ctxView.setBounds({ x, y, width: CTX_WIDTH, height: h });
-  ctxView.setVisible(true);
-  win.contentView.removeChildView(ctxView);
-  win.contentView.addChildView(ctxView); // keep it topmost
-  ctxView.webContents.send('ctx:items', items);
-  ctxView.webContents.focus();
-  ctxOpen = true;
+  let y = Math.max(S.CHROME_HEIGHT + 4, Math.min(params.y + S.CHROME_HEIGHT, height - h - 4));
+  S.ctxView.setBounds({ x, y, width: CTX_WIDTH, height: h });
+  S.ctxView.setVisible(true);
+  win.contentView.removeChildView(S.ctxView);
+  win.contentView.addChildView(S.ctxView); // keep it topmost
+  S.ctxView.webContents.send('ctx:items', items);
+  S.ctxView.webContents.focus();
+  S.ctxOpen = true;
 }
 
 function hideContext() {
-  if (!ctxView || !ctxOpen) return;
-  ctxView.setVisible(false);
-  ctxOpen = false;
-  ctxParams = null;
+  if (!S.ctxView || !S.ctxOpen) return;
+  S.ctxView.setVisible(false);
+  S.ctxOpen = false;
+  S.ctxParams = null;
 }
 
 function runCtxAction(id) {
-  const p = ctxParams || {};
+  const p = S.ctxParams || {};
   const wc = activePageWc();
   switch (id) {
     case 'back':
@@ -847,7 +829,7 @@ function runCtxAction(id) {
 
 // --- Bookmarks helpers ---
 function sendBookmarks() {
-  if (chromeView) chromeView.webContents.send('bookmarks', store.getBookmarks());
+  if (S.chromeView) S.chromeView.webContents.send('bookmarks', store.getBookmarks());
 }
 
 // --- Top-right popovers ---
@@ -862,7 +844,7 @@ function sendSiteinfo() {
   }
   const origin = originOf(url);
   const perms = origin ? store.getSitePermissions(origin) : {};
-  popoverView.webContents.send('siteinfo', {
+  S.popoverView.webContents.send('siteinfo', {
     secure: securityOf(at),
     host,
     origin: origin || '',
@@ -875,61 +857,61 @@ function showPopover(kind) {
   if (!s) return;
   const { width } = win.getContentBounds();
   const { x, y } = popoverPos(kind, s, width);
-  popoverView.setBounds({ x, y, width: s.w, height: s.h });
-  popoverView.setVisible(true);
-  popoverView.webContents.send('pop:show', kind);
+  S.popoverView.setBounds({ x, y, width: s.w, height: s.h });
+  S.popoverView.setVisible(true);
+  S.popoverView.webContents.send('pop:show', kind);
   sendDownloads();
-  if (kind === 'history') popoverView.webContents.send('history', store.getHistory().slice(0, 300));
+  if (kind === 'history') S.popoverView.webContents.send('history', store.getHistory().slice(0, 300));
   if (kind === 'siteinfo') sendSiteinfo();
   if (kind === 'shield') sendShield();
   if (kind === 'setup') sendSetup();
   if (kind === 'enginepick') {
-    popoverView.webContents.send('enginepick', { current: readSettings().searchEngine, list: allEngineMeta() });
+    S.popoverView.webContents.send('enginepick', { current: readSettings().searchEngine, list: allEngineMeta() });
   }
   if (kind === 'tabmenu') {
-    const t = tabs.find((x) => x.id === tabMenuTarget);
-    popoverView.webContents.send('tabmenu', { pinned: !!(t && t.pinned) });
+    const t = tabs.find((x) => x.id === S.tabMenuTarget);
+    S.popoverView.webContents.send('tabmenu', { pinned: !!(t && t.pinned) });
   }
-  popoverView.webContents.focus();
-  popKind = kind;
+  S.popoverView.webContents.focus();
+  S.popKind = kind;
 }
 
 // One default search engine, reflected in the omnibox button and the start page.
 function broadcastSearchEngine() {
   const cur = readSettings().searchEngine;
-  if (chromeView) chromeView.webContents.send('search-engine', cur);
-  if (heroView) heroView.webContents.send('search-engine', cur);
+  if (S.chromeView) S.chromeView.webContents.send('search-engine', cur);
+  if (S.heroView) S.heroView.webContents.send('search-engine', cur);
 }
 // The full engine set changed (custom engine added/removed): refresh the views
 // that hold a copy of the list so they can render new entries.
 function broadcastEngineList() {
   const list = allEngineMeta();
-  if (chromeView) chromeView.webContents.send('search-list', list);
-  if (heroView) heroView.webContents.send('search-list', list);
+  if (S.chromeView) S.chromeView.webContents.send('search-list', list);
+  if (S.heroView) S.heroView.webContents.send('search-list', list);
 }
 
 // First-run setup picker: current default-browser status + importable sources.
 function sendSetup() {
-  popoverView.webContents.send('setup:default', app.isDefaultProtocolClient('http'));
+  S.popoverView.webContents.send('setup:default', app.isDefaultProtocolClient('http'));
   migrateSourceList()
-    .then((list) => popoverView.webContents.send('setup:sources', list))
-    .catch(() => popoverView.webContents.send('setup:sources', []));
+    .then((list) => S.popoverView.webContents.send('setup:sources', list))
+    .catch(() => S.popoverView.webContents.send('setup:sources', []));
 }
 
 function sendShield() {
   const at = activeTab();
-  popoverView.webContents.send('shield', {
+  S.popoverView.webContents.send('shield', {
     count: at ? at.blocked || 0 : 0,
     enabled: readSettings().blockAds,
   });
 }
 function hidePopover() {
-  if (!popoverView) return;
-  popoverView.setVisible(false);
-  popKind = null;
+  if (!S.popoverView) return;
+  S.popoverView.setVisible(false);
+  S.popKind = null;
 }
 function togglePopover(kind) {
-  if (popKind === kind) hidePopover();
+  if (S.popKind === kind) hidePopover();
   else showPopover(kind);
 }
 
@@ -964,7 +946,7 @@ function attachTabView(tab) {
     tab.canGoForward = nh ? nh.canGoForward() : false;
     tab.loading = wc.isLoading();
     if (tab.url) tab.onHero = false;
-    if (id === activeTabId) sendState();
+    if (id === S.activeTabId) sendState();
     sendTabs();
   };
   for (const ev of [
@@ -994,8 +976,8 @@ function attachTabView(tab) {
   });
   // Find-in-page match counts for this tab.
   wc.on('found-in-page', (_e, result) => {
-    if (findView) {
-      findView.webContents.send('find:result', {
+    if (S.findView) {
+      S.findView.webContents.send('find:result', {
         active: result.activeMatchOrdinal,
         total: result.matches,
       });
@@ -1009,7 +991,7 @@ function attachTabView(tab) {
       upgraded.delete(validatedURL);
       tab.failedHttp = httpUrl;
       tab.onHero = false;
-      if (id === activeTabId) {
+      if (id === S.activeTabId) {
         updateContentVisibility();
         sendState();
       }
@@ -1020,12 +1002,12 @@ function attachTabView(tab) {
     // New page: forget any "add this site" offer until it re-declares one.
     tab.pendingEngine = null;
     tab.pendingEngineHref = null;
-    if (id === activeTabId) sendAddEngine();
+    if (id === S.activeTabId) sendAddEngine();
     if (tab.failedHttp) {
       tab.failedHttp = null;
-      if (id === activeTabId) updateContentVisibility();
+      if (id === S.activeTabId) updateContentVisibility();
     }
-    if (id === activeTabId) sendBlocked();
+    if (id === S.activeTabId) sendBlocked();
   });
   // HTTPS-only: upgrade http link navigations before they load.
   wc.on('will-navigate', (e, url) => {
@@ -1054,7 +1036,7 @@ function attachTabView(tab) {
 }
 
 function createTab(opts = {}) {
-  const id = ++tabSeq;
+  const id = ++S.tabSeq;
   if (opts.private) ensurePrivateSession(); // harden the in-memory session first
   const tab = {
     id,
@@ -1091,12 +1073,12 @@ function activateTab(id) {
   const tab = tabs.find((t) => t.id === id);
   if (!tab) return;
   // Mark the tab we are leaving as idle-from-now.
-  const prev = tabs.find((t) => t.id === activeTabId);
+  const prev = tabs.find((t) => t.id === S.activeTabId);
   if (prev && prev.id !== id) prev.lastActive = Date.now();
   if (tab.suspended) wakeTab(tab); // bring a discarded tab back before showing it
   tab.lastActive = Date.now();
-  activeTabId = id;
-  settingsOpen = false;
+  S.activeTabId = id;
+  S.settingsOpen = false;
   if (extensions && tab.view) {
     try {
       extensions.selectTab(tab.view.webContents);
@@ -1118,7 +1100,7 @@ function activateTab(id) {
 const SUSPEND_MS = 15 * 60 * 1000;
 
 function suspendTab(tab) {
-  if (!tab || tab.suspended || !tab.view || tab.id === activeTabId || tab.onHero) return;
+  if (!tab || tab.suspended || !tab.view || tab.id === S.activeTabId || tab.onHero) return;
   tab.url = tab.view.webContents.getURL() || tab.url; // remember where it was
   win.contentView.removeChildView(tab.view);
   try {
@@ -1146,7 +1128,7 @@ function wakeTab(tab) {
 function maybeSuspendIdleTabs() {
   const now = Date.now();
   for (const t of tabs) {
-    if (t.id === activeTabId || t.suspended || !t.view || t.onHero) continue;
+    if (t.id === S.activeTabId || t.suspended || !t.view || t.onHero) continue;
     if (now - (t.lastActive || 0) > SUSPEND_MS) suspendTab(t);
   }
 }
@@ -1156,7 +1138,7 @@ function closeTab(id) {
   if (idx < 0) return;
   const tab = tabs[idx];
   // Private tabs never go on the reopen stack (no traces).
-  if (tab.url && !tab.private) closedStack.push(tab.url);
+  if (tab.url && !tab.private) S.closedStack.push(tab.url);
   if (tab.view) {
     win.contentView.removeChildView(tab.view);
     try {
@@ -1169,7 +1151,7 @@ function closeTab(id) {
   // Wipe the private session once the last private tab is gone.
   if (tab.private && !hasPrivateTabs()) clearPrivateSession();
 
-  if (activeTabId === id) {
+  if (S.activeTabId === id) {
     const next = tabs[idx] || tabs[idx - 1];
     if (next) activateTab(next.id);
     else createTab(); // never leave zero tabs
@@ -1179,13 +1161,13 @@ function closeTab(id) {
 }
 
 function reopenClosed() {
-  const url = closedStack.pop();
+  const url = S.closedStack.pop();
   if (url) createTab({ url, activate: true });
 }
 
 function cycleTab(dir) {
   if (tabs.length < 2) return;
-  const i = tabs.findIndex((t) => t.id === activeTabId);
+  const i = tabs.findIndex((t) => t.id === S.activeTabId);
   const next = tabs[(i + dir + tabs.length) % tabs.length];
   activateTab(next.id);
 }
@@ -1200,7 +1182,7 @@ function goHome() {
   if (!at) return;
   at.onHero = true;
   at.onAIPage = false;
-  settingsOpen = false;
+  S.settingsOpen = false;
   updateContentVisibility();
   sendState();
   sendTabs();
@@ -1208,10 +1190,10 @@ function goHome() {
 
 // --- AI panel ---
 function toggleAI(force) {
-  aiOpen = typeof force === 'boolean' ? force : !aiOpen;
-  aiView.setVisible(aiOpen);
+  S.aiOpen = typeof force === 'boolean' ? force : !S.aiOpen;
+  S.aiView.setVisible(S.aiOpen);
   layout();
-  if (aiOpen) aiView.webContents.focus();
+  if (S.aiOpen) S.aiView.webContents.focus();
   sendState();
 }
 
@@ -1227,7 +1209,7 @@ function attachShortcuts(wc) {
     if (key === 'j') return (toggleAI(), stop());
     if (key === 't' && !input.shift) return (createTab(), stop());
     if (key === 'n' && input.shift) return (createTab({ private: true, activate: true }), stop());
-    if (key === 'w') return (activeTabId && closeTab(activeTabId), stop());
+    if (key === 'w') return (S.activeTabId && closeTab(S.activeTabId), stop());
     if (key === 't' && input.shift) return (reopenClosed(), stop());
     if (key === 'tab') return (cycleTab(input.shift ? -1 : 1), stop());
     if (/^[1-9]$/.test(input.key)) return (jumpTab(parseInt(input.key, 10)), stop());
@@ -1244,14 +1226,38 @@ function attachShortcuts(wc) {
       return stop();
     }
     if (key === 'l') {
-      chromeView.webContents.send('focus-omnibox');
-      chromeView.webContents.focus();
+      S.chromeView.webContents.send('focus-omnibox');
+      S.chromeView.webContents.focus();
       return stop();
     }
   });
 }
 
 function createBrowserWindow() {
+  // Per-window state lives on W; S points at the window currently being operated
+  // on. Views (S.S.chromeView etc.) are assigned below. win/tabs are still module
+  // globals in this batch and move onto W in the next.
+  const W = {};
+  windows.push(W);
+  focusedW = W;
+  S = W;
+  W.activeTabId = null;
+  W.tabSeq = 0;
+  W.closedStack = [];
+  W.settingsOpen = false;
+  W.popKind = null;
+  W.findOpen = false;
+  W.findText = '';
+  W.ctxOpen = false;
+  W.ctxParams = null;
+  W.permActive = null;
+  W.permQueue = [];
+  W.aiOpen = false;
+  W.infobarOpen = false;
+  W.CHROME_HEIGHT = BASE_CHROME;
+  W.tabMenuTarget = null;
+  W.tabMenuPos = { x: 0, y: 0 };
+
   win = new BaseWindow({
     width: 1280,
     height: 860,
@@ -1287,82 +1293,82 @@ function createBrowserWindow() {
     extensions = null;
   }
 
-  heroView = new WebContentsView({
+  S.heroView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'hero-preload.js') },
   });
-  win.contentView.addChildView(heroView);
-  heroView.webContents.loadFile(path.join(__dirname, 'hero.html'));
-  heroView.setVisible(false);
+  win.contentView.addChildView(S.heroView);
+  S.heroView.webContents.loadFile(path.join(__dirname, 'hero.html'));
+  S.heroView.setVisible(false);
 
-  interstitialView = new WebContentsView({
+  S.interstitialView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'interstitial-preload.js') },
   });
-  win.contentView.addChildView(interstitialView);
-  interstitialView.webContents.loadFile(path.join(__dirname, 'interstitial.html'));
-  interstitialView.setVisible(false);
+  win.contentView.addChildView(S.interstitialView);
+  S.interstitialView.webContents.loadFile(path.join(__dirname, 'interstitial.html'));
+  S.interstitialView.setVisible(false);
 
-  settingsView = new WebContentsView({
+  S.settingsView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'settings-preload.js') },
   });
-  win.contentView.addChildView(settingsView);
-  settingsView.webContents.loadFile(path.join(__dirname, 'settings.html'));
-  settingsView.setVisible(false);
+  win.contentView.addChildView(S.settingsView);
+  S.settingsView.webContents.loadFile(path.join(__dirname, 'settings.html'));
+  S.settingsView.setVisible(false);
 
-  aiPageView = new WebContentsView({
+  S.aiPageView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
   });
-  win.contentView.addChildView(aiPageView);
-  aiPageView.webContents.loadFile(path.join(__dirname, 'ai-page.html'));
-  aiPageView.setVisible(false);
+  win.contentView.addChildView(S.aiPageView);
+  S.aiPageView.webContents.loadFile(path.join(__dirname, 'ai-page.html'));
+  S.aiPageView.setVisible(false);
 
-  aiView = new WebContentsView({
+  S.aiView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'ai-preload.js') },
   });
-  win.contentView.addChildView(aiView);
-  aiView.webContents.loadFile(path.join(__dirname, 'ai.html'));
-  aiView.setVisible(false);
+  win.contentView.addChildView(S.aiView);
+  S.aiView.webContents.loadFile(path.join(__dirname, 'ai.html'));
+  S.aiView.setVisible(false);
 
-  chromeView = new WebContentsView({
+  S.chromeView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'preload.js') },
   });
-  win.contentView.addChildView(chromeView);
-  chromeView.webContents.loadFile(path.join(__dirname, 'index.html'));
+  win.contentView.addChildView(S.chromeView);
+  S.chromeView.webContents.loadFile(path.join(__dirname, 'index.html'));
 
-  popoverView = new WebContentsView({
+  S.popoverView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'overlay-preload.js') },
   });
-  win.contentView.addChildView(popoverView);
-  popoverView.webContents.loadFile(path.join(__dirname, 'overlay.html'));
-  popoverView.setVisible(false);
+  win.contentView.addChildView(S.popoverView);
+  S.popoverView.webContents.loadFile(path.join(__dirname, 'overlay.html'));
+  S.popoverView.setVisible(false);
   // Close on click-away, except the first-run setup picker: opening Windows
   // Default Apps steals focus, and we don't want that to abort the import step.
-  popoverView.webContents.on('blur', () => {
-    if (popKind !== 'setup') hidePopover();
+  S.popoverView.webContents.on('blur', () => {
+    if (S.popKind !== 'setup') hidePopover();
   });
 
-  findView = new WebContentsView({
+  S.findView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'find-preload.js') },
   });
-  win.contentView.addChildView(findView);
-  findView.webContents.loadFile(path.join(__dirname, 'find.html'));
-  findView.setVisible(false);
+  win.contentView.addChildView(S.findView);
+  S.findView.webContents.loadFile(path.join(__dirname, 'find.html'));
+  S.findView.setVisible(false);
 
-  ctxView = new WebContentsView({
+  S.ctxView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'context-preload.js') },
   });
-  win.contentView.addChildView(ctxView);
-  ctxView.webContents.loadFile(path.join(__dirname, 'context.html'));
-  ctxView.setVisible(false);
-  ctxView.webContents.on('blur', hideContext); // close on click-away
+  win.contentView.addChildView(S.ctxView);
+  S.ctxView.webContents.loadFile(path.join(__dirname, 'context.html'));
+  S.ctxView.setVisible(false);
+  S.ctxView.webContents.on('blur', hideContext); // close on click-away
 
-  permView = new WebContentsView({
+  S.permView = new WebContentsView({
     webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, 'permission-preload.js') },
   });
-  win.contentView.addChildView(permView);
-  permView.webContents.loadFile(path.join(__dirname, 'permission.html'));
-  permView.setVisible(false);
+  win.contentView.addChildView(S.permView);
+  S.permView.webContents.loadFile(path.join(__dirname, 'permission.html'));
+  S.permView.setVisible(false);
 
-  for (const v of [heroView, interstitialView, settingsView, aiPageView, aiView, chromeView, popoverView, findView, ctxView, permView]) {
+  for (const v of [S.heroView, S.interstitialView, S.settingsView, S.aiPageView, S.aiView, S.chromeView, S.popoverView, S.findView, S.ctxView, S.permView]) {
     attachShortcuts(v.webContents);
     v.webContents.on('did-finish-load', () => applyAccent(v));
     // Trusted chrome must never navigate itself or spawn windows. Real web
@@ -1371,24 +1377,6 @@ function createBrowserWindow() {
     v.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   }
 
-  // Register this window. Phase 1: the module globals above remain the source of
-  // truth for the single window; W just holds handles so windows[]/focusedWindow()
-  // and (later) windowFromEvent() can resolve it. Step 1.2 moves state onto W.
-  const W = {
-    win,
-    chromeView,
-    heroView,
-    interstitialView,
-    settingsView,
-    aiPageView,
-    aiView,
-    popoverView,
-    findView,
-    ctxView,
-    permView,
-  };
-  windows.push(W);
-  focusedW = W;
   win.on('focus', () => {
     focusedW = W;
   });
@@ -1416,7 +1404,7 @@ function saveSession() {
   // Private tabs are ephemeral and never restored.
   const open = tabs.filter((t) => !t.onHero && !t.private && (t.url || t.suspended));
   const list = open.map((t) => ({ url: t.url, title: t.title, pinned: !!t.pinned }));
-  const active = Math.max(0, open.findIndex((t) => t.id === activeTabId));
+  const active = Math.max(0, open.findIndex((t) => t.id === S.activeTabId));
   try {
     fs.writeFileSync(sessionPath(), JSON.stringify({ tabs: list, active }), 'utf8');
   } catch {
@@ -1442,7 +1430,7 @@ function restoreSession() {
   for (const t of sess.tabs) {
     if (!t || !t.url || !/^https?:\/\//i.test(t.url)) continue;
     // Create as a suspended (lazy) tab; it loads when activated/clicked.
-    const id = ++tabSeq;
+    const id = ++S.tabSeq;
     tabs.push({
       id,
       view: null,
@@ -1655,7 +1643,7 @@ async function executeTool(name, input) {
       let url = String(input.url || '');
       if (!url) return 'No URL given.';
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-      if (heroView) heroView.webContents.send('hero:add-dial', { name: input.name || '', url });
+      if (S.heroView) S.heroView.webContents.send('hero:add-dial', { name: input.name || '', url });
       return 'Added ' + url + ' to the start page.';
     }
     default:
@@ -1825,7 +1813,7 @@ ipcMain.handle('navigate', (_e, input) => {
   if (url && at) {
     at.onHero = false;
     at.onAIPage = false;
-    settingsOpen = false;
+    S.settingsOpen = false;
     at.view.webContents.loadURL(url);
     updateContentVisibility();
   }
@@ -1866,14 +1854,14 @@ ipcMain.on('zoom', (_e, dir) => {
 });
 ipcMain.on('open-settings', () => {
   toggleAI(true);
-  aiView.webContents.send('open-settings');
+  S.aiView.webContents.send('open-settings');
 });
 ipcMain.on('settings:open', (_e, section) => openSettingsPage(section));
 ipcMain.on('settings:close', closeSettingsPage);
 ipcMain.on('settings:open-ai', () => {
   closeSettingsPage();
   toggleAI(true);
-  aiView.webContents.send('open-settings');
+  S.aiView.webContents.send('open-settings');
 });
 ipcMain.on('download:open', (_e, id) => {
   const d = downloads.find((x) => x.id === id);
@@ -1904,8 +1892,8 @@ ipcMain.on('search:set', (_e, id) => {
 ipcMain.on('hero:engines-set', (_e, ids) => {
   if (!Array.isArray(ids)) return;
   writeSettings({ heroEngines: ids.filter((id) => engineExists(id)) });
-  if (heroView) {
-    heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((id) => engineExists(id)));
+  if (S.heroView) {
+    S.heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((id) => engineExists(id)));
   }
 });
 
@@ -1951,8 +1939,8 @@ ipcMain.handle('engine:remove', (_e, id) => {
   writeSettings(patch);
   broadcastSearchEngine();
   broadcastEngineList();
-  if (heroView) {
-    heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((x) => engineExists(x)));
+  if (S.heroView) {
+    S.heroView.webContents.send('hero-engines', (readSettings().heroEngines || []).filter((x) => engineExists(x)));
   }
   return { ok: true };
 });
@@ -2036,7 +2024,7 @@ function tabByContents(wc) {
 function sendAddEngine() {
   const at = activeTab();
   const pe = at && at.pendingEngine ? at.pendingEngine : null;
-  if (chromeView) chromeView.webContents.send('add-engine', pe ? { name: pe.name } : null);
+  if (S.chromeView) S.chromeView.webContents.send('add-engine', pe ? { name: pe.name } : null);
 }
 ipcMain.on('opensearch:found', async (e, { href } = {}) => {
   const tab = tabByContents(e.sender);
@@ -2054,7 +2042,7 @@ ipcMain.on('opensearch:found', async (e, { href } = {}) => {
     // Don't offer one we already have (built-in or custom) for this domain.
     if (allEngineMeta().some((m) => m.domain === domain)) return;
     tab.pendingEngine = { name: meta.name || domain, template: meta.template, domain };
-    if (tab.id === activeTabId) sendAddEngine();
+    if (tab.id === S.activeTabId) sendAddEngine();
   } catch {
     /* ignore */
   }
@@ -2090,16 +2078,16 @@ ipcMain.on('bookmark:remove', (_e, url) => {
 ipcMain.on('find:query', (_e, { text, forward }) => {
   const at = activeTab();
   if (!at) return;
-  findText = text || '';
-  if (!findText) {
+  S.findText = text || '';
+  if (!S.findText) {
     at.view.webContents.stopFindInPage('clearSelection');
     return;
   }
-  at.view.webContents.findInPage(findText, { forward: forward !== false, findNext: false });
+  at.view.webContents.findInPage(S.findText, { forward: forward !== false, findNext: false });
 });
 ipcMain.on('find:next', (_e, forward) => {
   const at = activeTab();
-  if (at && findText) at.view.webContents.findInPage(findText, { forward, findNext: true });
+  if (at && S.findText) at.view.webContents.findInPage(S.findText, { forward, findNext: true });
 });
 ipcMain.on('find:close', hideFind);
 ipcMain.on('find:show', showFind);
@@ -2116,14 +2104,14 @@ ipcMain.on('blocker:toggle', () => {
   const next = !readSettings().blockAds;
   writeSettings({ blockAds: next });
   setBlocking(next);
-  if (popKind === 'shield') sendShield();
+  if (S.popKind === 'shield') sendShield();
   sendBlocked();
 });
 
 // --- IPC: site-info popover (clear a remembered per-site permission) ---
 ipcMain.on('perm:clear', (_e, { origin, perm }) => {
   store.clearPermission(origin, perm);
-  if (popKind === 'siteinfo') sendSiteinfo();
+  if (S.popKind === 'siteinfo') sendSiteinfo();
 });
 
 // --- IPC: HTTPS-only interstitial ---
@@ -2150,7 +2138,7 @@ ipcMain.on('interstitial:back', () => {
 ipcMain.on('pop:history', () => showPopover('history'));
 ipcMain.on('history:clear', () => {
   store.clearHistory();
-  if (popKind === 'history' && popoverView) popoverView.webContents.send('history', []);
+  if (S.popKind === 'history' && S.popoverView) S.popoverView.webContents.send('history', []);
 });
 
 // --- IPC: hero AI model providers (drives the hero pills + panel) ---
@@ -2180,12 +2168,12 @@ ipcMain.on('tab:close', (_e, id) => closeTab(id));
 ipcMain.on('tab:activate', (_e, id) => activateTab(id));
 ipcMain.on('tab:reopen', () => reopenClosed());
 ipcMain.on('tab:menu', (_e, { id, x, y }) => {
-  tabMenuTarget = id;
-  tabMenuPos = { x: x | 0, y: y | 0 };
+  S.tabMenuTarget = id;
+  S.tabMenuPos = { x: x | 0, y: y | 0 };
   showPopover('tabmenu');
 });
 ipcMain.on('tab:action', (_e, action) => {
-  const id = tabMenuTarget;
+  const id = S.tabMenuTarget;
   hidePopover();
   if (!id) return;
   const tab = tabs.find((t) => t.id === id);
@@ -2221,26 +2209,26 @@ ipcMain.on('ai:to-sidebar', (_e, data) => {
   sendState();
   sendTabs();
   toggleAI(true);
-  aiView.webContents.send('ai:load', data);
+  S.aiView.webContents.send('ai:load', data);
 });
 
 // --- Infobar: a non-blocking strip in the chrome, shared by the first-run
 // default-browser prompt and update notifications. ---
 function showInfobar(payload) {
-  infobarOpen = true;
-  CHROME_HEIGHT = BASE_CHROME + INFOBAR_HEIGHT;
-  if (chromeView) chromeView.webContents.send('infobar:show', payload);
+  S.infobarOpen = true;
+  S.CHROME_HEIGHT = BASE_CHROME + INFOBAR_HEIGHT;
+  if (S.chromeView) S.chromeView.webContents.send('infobar:show', payload);
   layout();
 }
 function hideInfobar() {
-  infobarOpen = false;
-  CHROME_HEIGHT = BASE_CHROME;
-  if (chromeView) chromeView.webContents.send('infobar:hide');
+  S.infobarOpen = false;
+  S.CHROME_HEIGHT = BASE_CHROME;
+  if (S.chromeView) S.chromeView.webContents.send('infobar:hide');
   layout();
 }
 function maybeShowFirstRun() {
   const s = readSettings();
-  if (s.seenDefaultPrompt || infobarOpen) return;
+  if (s.seenDefaultPrompt || S.infobarOpen) return;
   // Shown once per fresh profile. We no longer skip it when already the default
   // browser: the welcome also offers to import your data, which is useful
   // regardless. The picker itself reflects current default status.
@@ -2596,7 +2584,7 @@ ipcMain.handle('data:clear', async (_e, opts = {}) => {
   if (opts.history) {
     store.clearHistory();
     done.history = true;
-    if (popKind === 'history' && popoverView) popoverView.webContents.send('history', []);
+    if (S.popKind === 'history' && S.popoverView) S.popoverView.webContents.send('history', []);
   }
   if (opts.cookies) {
     try {
@@ -2697,7 +2685,7 @@ ipcMain.on('hero:search', (_e, { engine, query }) => {
   if (query && query.trim() && at) {
     at.onHero = false;
     at.onAIPage = false;
-    settingsOpen = false;
+    S.settingsOpen = false;
     at.view.webContents.loadURL(buildSearchUrl(engine, query.trim()));
     updateContentVisibility();
   }
@@ -2708,7 +2696,7 @@ ipcMain.on('hero:open', (_e, { url }) => {
   if (target && at) {
     at.onHero = false;
     at.onAIPage = false;
-    settingsOpen = false;
+    S.settingsOpen = false;
     at.view.webContents.loadURL(target);
     updateContentVisibility();
   }
