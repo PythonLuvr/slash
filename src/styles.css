@@ -676,3 +676,20 @@ browser-action-list,
   stroke-linecap: round;
   display: block;
 }
+
+/* Asleep tab: a moon stands in for the favicon so it's obvious in the strip. */
+.tab .tab-zzz {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tab .tab-zzz svg {
+  width: 14px;
+  height: 14px;
+  fill: var(--accent);
+  stroke: none;
+  opacity: 0.85;
+}

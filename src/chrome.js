@@ -83,8 +83,15 @@ function renderTabs(list) {
       tab.appendChild(m);
     }
 
-    // favicon (or a neutral fallback)
-    if (t.favicon) {
+    // favicon (or a moon when asleep, or a neutral fallback)
+    if (t.suspended) {
+      const z = document.createElement('span');
+      z.className = 'tab-zzz';
+      z.setAttribute('aria-hidden', 'true');
+      z.title = 'Asleep (click to wake)';
+      z.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 7 7 0 1 0 20 14.5z" /></svg>';
+      tab.appendChild(z);
+    } else if (t.favicon) {
       const img = document.createElement('img');
       img.className = 'favicon';
       img.src = t.favicon;
