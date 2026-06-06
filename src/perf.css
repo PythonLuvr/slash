@@ -13,10 +13,11 @@ body {
 #panel {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 13px;
   height: 100%;
-  padding: 16px 14px;
+  padding: 15px 14px;
   border-right: 1px solid var(--border);
+  overflow: hidden;
 }
 
 .phead {
@@ -25,40 +26,65 @@ body {
   justify-content: space-between;
 }
 .ptitle {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   color: var(--muted);
   text-transform: uppercase;
 }
 .pnow {
   font-family: var(--font-mono);
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--ink);
 }
 
-/* Memory gauge */
+/* Live memory graph */
+.spark {
+  width: 100%;
+  height: 46px;
+  display: block;
+  margin: -2px 0 2px;
+}
+.spark-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+.spark-area {
+  fill: var(--accent-soft);
+  stroke: none;
+  opacity: 0.5;
+}
+.spark-cap {
+  stroke: var(--ink);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  opacity: 0.4;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Gauge */
 .gauge-track {
   position: relative;
-  height: 12px;
-  border-radius: 7px;
+  height: 10px;
+  border-radius: 6px;
   background: var(--raised);
   border: 1px solid var(--border);
   overflow: hidden;
 }
 .gauge-fill {
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
+  inset: 0 auto 0 0;
   width: 0%;
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--accent);
   transition: width 0.5s ease, background 0.3s ease;
 }
 .gauge-fill.over {
-  background: #e6883c; /* amber when over the cap */
+  background: #e6883c;
 }
 .gauge-cap {
   position: absolute;
@@ -66,8 +92,8 @@ body {
   bottom: -2px;
   width: 2px;
   background: var(--ink);
-  opacity: 0.55;
-  left: 50%;
+  opacity: 0.5;
+  left: 68%;
 }
 .gauge-cap.hidden {
   display: none;
@@ -75,7 +101,6 @@ body {
 .gauge-foot {
   display: flex;
   justify-content: space-between;
-  margin-top: 7px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--muted);
@@ -84,7 +109,49 @@ body {
   color: var(--faint);
 }
 
-/* Rows */
+/* CPU + Net meters */
+.meters {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.m-label {
+  width: 28px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.m-track {
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 4px;
+  background: var(--raised);
+  overflow: hidden;
+}
+.m-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--muted);
+  border-radius: 4px;
+  transition: width 0.45s ease, background 0.3s ease;
+}
+.m-fill.hot {
+  background: #e6883c;
+}
+.m-val {
+  width: 58px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Rows + switch */
 .row {
   display: flex;
   align-items: center;
@@ -97,8 +164,6 @@ body {
 .toggle-row {
   cursor: pointer;
 }
-
-/* iOS-style switch */
 .switch {
   position: relative;
   width: 38px;
@@ -143,7 +208,7 @@ body {
 .cap-block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 .cap-block.off {
   opacity: 0.4;
@@ -171,14 +236,110 @@ body {
   font-size: 10px;
   color: var(--faint);
 }
-.cap-scale-end {
-  text-align: right;
+
+/* Free-now button */
+.free-btn {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.free-btn:hover {
+  background: var(--raised-2, var(--raised));
+  border-color: var(--accent);
+}
+.free-btn:active {
+  transform: translateY(1px);
 }
 
-.hint {
-  margin: 0;
-  margin-top: auto;
+/* Heaviest tabs */
+.tabs-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.tabs-head {
   font-size: 11px;
-  line-height: 1.5;
-  color: var(--faint);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.tab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.tab-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.tab-row:hover {
+  background: var(--raised);
+}
+.tab-row.active {
+  background: var(--accent-soft);
+}
+.tab-row.asleep {
+  opacity: 0.5;
+}
+.t-host {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.t-mb {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.t-sleep {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.t-sleep:hover:not(:disabled) {
+  background: var(--raised-2, var(--raised));
+  color: var(--ink);
+}
+.t-sleep:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.t-sleep svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }

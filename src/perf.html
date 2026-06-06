@@ -9,40 +9,62 @@
   </head>
   <body>
     <div id="panel">
+      <!-- Memory: number + live graph + gauge -->
       <div class="phead">
         <span class="ptitle">Memory</span>
         <span id="mem-now" class="pnow">&mdash;</span>
       </div>
 
-      <div class="gauge">
-        <div class="gauge-track">
-          <div id="gauge-fill" class="gauge-fill"></div>
-          <div id="gauge-cap" class="gauge-cap" title="Your limit"></div>
+      <svg id="spark" class="spark" viewBox="0 0 100 34" preserveAspectRatio="none">
+        <path id="spark-area" class="spark-area" d="" />
+        <path id="spark-line" class="spark-line" d="" />
+        <line id="spark-cap" class="spark-cap" x1="0" y1="0" x2="100" y2="0" />
+      </svg>
+
+      <div class="gauge-track">
+        <div id="gauge-fill" class="gauge-fill"></div>
+        <div id="gauge-cap" class="gauge-cap"></div>
+      </div>
+      <div class="gauge-foot">
+        <span id="tab-count">0 tabs</span>
+        <span id="sleep-count" class="muted"></span>
+      </div>
+
+      <!-- CPU + network meters -->
+      <div class="meters">
+        <div class="meter">
+          <span class="m-label">CPU</span>
+          <div class="m-track"><div id="cpu-fill" class="m-fill"></div></div>
+          <span id="cpu-val" class="m-val">0%</span>
         </div>
-        <div class="gauge-foot">
-          <span id="tab-count">0 tabs</span>
-          <span id="sleep-count" class="muted"></span>
+        <div class="meter">
+          <span class="m-label">Net</span>
+          <div class="m-track"><div id="net-fill" class="m-fill"></div></div>
+          <span id="net-val" class="m-val">0 KB/s</span>
         </div>
       </div>
 
+      <!-- Limiter -->
       <label class="row toggle-row">
         <span class="row-label">Limit memory</span>
         <span class="switch"><input type="checkbox" id="limiter-on" /><span class="slider"></span></span>
       </label>
-
       <div id="cap-block" class="cap-block">
         <div class="cap-head">
           <span class="row-label">Cap</span>
           <span id="cap-text" class="cap-text">500 MB</span>
         </div>
         <input type="range" id="cap-slider" min="500" max="4000" step="250" value="500" aria-label="Memory cap" />
-        <div class="cap-scale"><span>500 MB</span><span>Lean</span><span class="cap-scale-end">4 GB</span></div>
+        <div class="cap-scale"><span>500 MB</span><span class="cap-scale-end">4 GB</span></div>
       </div>
 
-      <p class="hint">
-        Over the cap, the least-recently-used background tabs sleep to free memory.
-        They reload instantly when you click them. Higher cap keeps more tabs loaded.
-      </p>
+      <button id="free-now" class="free-btn" type="button">Free memory now</button>
+
+      <!-- Heaviest tabs -->
+      <div class="tabs-block">
+        <div class="tabs-head">Heaviest tabs</div>
+        <div id="tab-list" class="tab-list"></div>
+      </div>
     </div>
     <script src="perf.js"></script>
   </body>

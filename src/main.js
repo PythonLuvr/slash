@@ -64,7 +64,7 @@ const BASE_CHROME = TABSTRIP_HEIGHT + TOOLBAR_HEIGHT + BOOKMARKS_HEIGHT;
 const FIND_W = 360;
 const FIND_HEIGHT = 44;
 const AI_WIDTH = 400;
-const PERF_WIDTH = 268; // left performance/memory panel
+const PERF_WIDTH = 304; // left performance/memory panel
 const CTX_WIDTH = 244;
 const CTX_ROW = 34; // .pop-item height in context.css
 const CTX_SEP = 11; // .pop-sep height + margins
@@ -2913,21 +2913,106 @@ handleWin('favicon:get', (_e, host) => {
 });
 
 // --- IPC: app stats (memory + tab counts) for the menu readout ---
-handleWin('app:stats', () => {
-  let kb = 0;
+// --- Network throughput sampling (best-effort: sums Content-Length seen) ---
+let netBytes = 0;
+let netLastBytes = 0;
+let netLastT = Date.now();
+let netHooked = false;
+function ensureNetCounter() {
+  if (netHooked) return;
+  netHooked = true;
   try {
-    for (const m of app.getAppMetrics()) kb += (m.memory && m.memory.workingSetSize) || 0;
+    session.defaultSession.webRequest.onCompleted((details) => {
+      const h = details.responseHeaders || {};
+      for (const k of Object.keys(h)) {
+        if (k.toLowerCase() === 'content-length') {
+          netBytes += parseInt(Array.isArray(h[k]) ? h[k][0] : h[k], 10) || 0;
+          break;
+        }
+      }
+    });
+  } catch {
+    /* webRequest unavailable */
+  }
+}
+function netRate() {
+  const now = Date.now();
+  const dt = Math.max(0.25, (now - netLastT) / 1000);
+  const rate = Math.max(0, (netBytes - netLastBytes) / dt);
+  netLastBytes = netBytes;
+  netLastT = now;
+  return Math.round(rate); // bytes/sec
+}
+function tabHost(t) {
+  let u = t.url || '';
+  try {
+    if (t.view) u = t.view.webContents.getURL() || u;
+  } catch {
+    /* gone */
+  }
+  try {
+    return new URL(u).hostname.replace(/^www\./, '');
+  } catch {
+    return t.onHero ? 'New tab' : t.title || 'Tab';
+  }
+}
+
+handleWin('app:stats', () => {
+  ensureNetCounter();
+  let kb = 0;
+  let cpu = 0;
+  const memByPid = new Map();
+  try {
+    for (const m of app.getAppMetrics()) {
+      const wk = (m.memory && m.memory.workingSetSize) || 0;
+      kb += wk;
+      cpu += (m.cpu && m.cpu.percentCPUUsage) || 0;
+      memByPid.set(m.pid, Math.round(wk / 1024));
+    }
   } catch {
     /* ignore */
   }
   const asleep = S.tabs.filter((t) => t.suspended).length;
-  return { memMB: Math.round(kb / 1024), tabs: S.tabs.length, asleep, ramLimitMB: readSettings().ramLimitMB };
+  const tabList = S.tabs
+    .map((t) => {
+      let mb = 0;
+      try {
+        if (t.view) mb = memByPid.get(t.view.webContents.getOSProcessId()) || 0;
+      } catch {
+        /* gone */
+      }
+      return { id: t.id, title: t.title || 'New tab', host: tabHost(t), mb, suspended: !!t.suspended, active: t.id === S.activeTabId };
+    })
+    .sort((a, b) => b.mb - a.mb);
+  return {
+    memMB: Math.round(kb / 1024),
+    cpu: Math.round(cpu),
+    net: netRate(),
+    tabs: S.tabs.length,
+    asleep,
+    ramLimitMB: readSettings().ramLimitMB,
+    tabList,
+  };
 });
 
-// Quick RAM cap change from the menu (mirrors Settings -> Performance).
+// Quick RAM cap change from the menu / panel (mirrors Settings -> Performance).
 onWin('ram:set-limit', (_e, mb) => {
   writeSettings({ ramLimitMB: typeof mb === 'number' ? mb : 0 });
   enforceRamLimit();
+});
+
+// Sleep every idle background tab in this window right now.
+onWin('ram:free-now', () => {
+  for (const t of [...S.tabs]) {
+    if (t.id === S.activeTabId || t.suspended || !t.view || t.onHero) continue;
+    suspendTab(t);
+  }
+});
+
+// Sleep one specific tab from the panel's heaviest-tabs list.
+onWin('ram:sleep-tab', (_e, id) => {
+  const t = S.tabs.find((x) => x.id === id);
+  if (t && t.id !== S.activeTabId) suspendTab(t);
 });
 
 // --- IPC: clear browsing data ---
