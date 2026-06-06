@@ -140,6 +140,30 @@ function fallbackIcon() {
 }
 
 // --- State ---
+// Page-load progress bar: ease to ~85% while loading, snap to 100% and fade on done.
+let progLoading = false;
+function setLoading(loading) {
+  if (loading === progLoading) return;
+  progLoading = loading;
+  const p = $('progress');
+  if (!p) return;
+  if (loading) {
+    p.classList.add('on');
+    p.style.width = '8%';
+    requestAnimationFrame(() => {
+      if (progLoading) p.style.width = '85%';
+    });
+  } else {
+    p.style.width = '100%';
+    setTimeout(() => {
+      if (!progLoading) {
+        p.classList.remove('on');
+        p.style.width = '0';
+      }
+    }, 280);
+  }
+}
+
 window.slash.onState((s) => {
   if (!omnibarFocused) omnibar.value = s.url || '';
   if (s.mode === 'hero') {
@@ -154,6 +178,7 @@ window.slash.onState((s) => {
     reload.dataset.loading = s.loading ? '1' : '0';
     reload.innerHTML = s.loading ? '&#10005;' : '&#10227;';
   }
+  setLoading(s.mode !== 'hero' && !!s.loading);
   $('ai').classList.toggle('active', !!s.aiOpen);
   $('perf').classList.toggle('active', !!s.perfOpen);
   const star = $('star');

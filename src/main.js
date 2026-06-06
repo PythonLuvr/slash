@@ -1473,6 +1473,7 @@ function makeView(key, visible) {
   const v = new WebContentsView({ webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, preload) } });
   S[key] = v;
   S.win.contentView.addChildView(v);
+  try { v.setBackgroundColor('#1c1c1f'); } catch { /* older electron */ } // no white flash while loading
   v.webContents.loadFile(path.join(__dirname, html));
   v.setVisible(!!visible);
   v.ready = false;

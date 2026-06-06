@@ -565,3 +565,22 @@ browser-action-list,
   background: currentColor;
   border-radius: 1px;
 }
+
+/* Page-load progress bar, pinned to the bottom edge of the chrome strip */
+.progress {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  height: 2.5px;
+  width: 0;
+  background: var(--accent);
+  opacity: 0;
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 6px var(--accent);
+  transition: width 0.3s ease, opacity 0.25s ease;
+  pointer-events: none;
+  z-index: 60;
+}
+.progress.on {
+  opacity: 1;
+}
