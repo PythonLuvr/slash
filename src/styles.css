@@ -584,3 +584,95 @@ browser-action-list,
 .progress.on {
   opacity: 1;
 }
+
+/* ============================================================
+   Unified toolbar icons: one size, one weight, one color set.
+   ============================================================ */
+.tool svg,
+.siteinfo svg,
+.omni-engine svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  display: block;
+}
+/* The menu uses filled dots, not strokes. */
+.menu-btn svg circle {
+  fill: currentColor;
+  stroke: none;
+}
+/* Logical groups + a hairline divider before the profile/menu cluster. */
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.tb-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 6px;
+  flex: 0 0 auto;
+}
+#omnibox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 6px;
+}
+/* Home now lives in the nav group as a normal tool. */
+#home {
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  border-radius: 8px;
+}
+/* New-tab button: uniform tool, aligned to the tab baseline. */
+#tab-new {
+  width: 30px;
+  height: 30px;
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 0;
+}
+/* Every action icon is neutral by default; accent only when active. */
+#ai {
+  color: var(--muted);
+}
+#ai.active,
+#perf.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+/* Search-engine caret: a small, quiet chevron. */
+.omni-engine .oe-caret {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2.2;
+  opacity: 0.65;
+}
+/* Bookmark fills in when the page is saved. */
+#star.on {
+  color: var(--accent);
+}
+#star.on svg {
+  fill: var(--accent);
+}
+
+/* Tab close button: small X, same line style as the toolbar. */
+.close svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  display: block;
+}

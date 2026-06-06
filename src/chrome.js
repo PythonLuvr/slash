@@ -6,15 +6,14 @@ const reload = $('reload');
 const tabsEl = $('tabs');
 const siteinfo = $('siteinfo');
 const home = $('home');
-
-home.innerHTML =
-  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v9h5v-5h4v5h5v-9"/></svg>';
 home.addEventListener('click', () => window.slash.goHome());
+
+// Reload <-> stop share the button; both are SVG so they match the icon set.
+const RELOAD_SVG = '<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 1 2.64 6.36M3 18v-4h4" /></svg>';
+const STOP_SVG = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>';
 
 const shield = $('shield');
 const shieldBadge = $('shield-badge');
-shield.querySelector('.sh-ico').innerHTML =
-  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z"/></svg>';
 shield.addEventListener('click', () => window.slash.togglePop('shield'));
 
 // Blocked-count badge for the active tab.
@@ -108,7 +107,7 @@ function renderTabs(list) {
       close.type = 'button';
       close.setAttribute('aria-label', 'Close tab');
       close.title = 'Close (Ctrl+W)';
-      close.innerHTML = '&#10005;';
+      close.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>';
       close.addEventListener('click', (e) => {
         e.stopPropagation();
         window.slash.closeTab(t.id);
@@ -171,12 +170,12 @@ window.slash.onState((s) => {
     back.disabled = true;
     forward.disabled = true;
     reload.dataset.loading = '0';
-    reload.innerHTML = '&#10227;';
+    reload.innerHTML = RELOAD_SVG;
   } else {
     back.disabled = !s.canGoBack;
     forward.disabled = !s.canGoForward;
     reload.dataset.loading = s.loading ? '1' : '0';
-    reload.innerHTML = s.loading ? '&#10005;' : '&#10227;';
+    reload.innerHTML = s.loading ? STOP_SVG : RELOAD_SVG;
   }
   setLoading(s.mode !== 'hero' && !!s.loading);
   $('ai').classList.toggle('active', !!s.aiOpen);
