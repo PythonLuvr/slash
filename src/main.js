@@ -447,6 +447,7 @@ function ensureExtensions(profileId) {
         useWindow(W);
         const id = createTab({ url: details.url, activate: details.active !== false });
         const t = W.tabs.find((x) => x.id === id);
+        ensureTabView(t); // extensions expect a real webContents back
         return Promise.resolve([t.view.webContents, W.win]);
       },
       selectTab: (wc) => {
@@ -816,7 +817,7 @@ function hideFind() {
   S.findOpen = false;
   if (S.findView) S.findView.setVisible(false);
   const at = activeTab();
-  if (at) at.view.webContents.stopFindInPage('clearSelection');
+  if (at && at.view) at.view.webContents.stopFindInPage('clearSelection');
 }
 
 // --- Right-click context menu ---
@@ -1212,13 +1213,15 @@ function createTab(opts = {}) {
     pinned: false, // pinned S.tabs sit first, compact, and survive "close others"
     private: !!opts.private, // in-memory session, no history, no traces
   };
-  attachTabView(tab);
   S.tabs.push(tab);
 
   if (opts.url) {
+    // Navigating immediately: give it a renderer now.
     tab.onHero = false;
+    attachTabView(tab);
     tab.view.webContents.loadURL(normalizeInput(opts.url) || opts.url);
   }
+  // A blank start-page tab stays viewless until it navigates (see ensureTabView).
   if (opts.activate !== false) activateTab(id);
   else sendTabs();
   layout();
@@ -1280,6 +1283,16 @@ function wakeTab(tab) {
     tab.view.webContents.loadURL(tab.url);
   }
   layout();
+}
+
+// A blank (start-page) tab has no renderer until it actually goes somewhere.
+// Create its view on demand so an idle "New tab" costs nothing.
+function ensureTabView(tab) {
+  if (tab && !tab.view) {
+    attachTabView(tab);
+    layout();
+  }
+  return tab && tab.view;
 }
 
 function maybeSuspendIdleTabs() {
@@ -2095,6 +2108,7 @@ handleWin('navigate', (_e, input) => {
     at.onHero = false;
     at.onAIPage = false;
     S.settingsOpen = false;
+    ensureTabView(at); // blank tabs have no renderer until now
     at.view.webContents.loadURL(url);
     updateContentVisibility();
   }
@@ -2102,11 +2116,11 @@ handleWin('navigate', (_e, input) => {
 });
 onWin('back', () => {
   const at = activeTab();
-  if (at && at.view.webContents.navigationHistory?.canGoBack()) at.view.webContents.navigationHistory.goBack();
+  if (at && at.view && at.view.webContents.navigationHistory?.canGoBack()) at.view.webContents.navigationHistory.goBack();
 });
 onWin('forward', () => {
   const at = activeTab();
-  if (at && at.view.webContents.navigationHistory?.canGoForward())
+  if (at && at.view && at.view.webContents.navigationHistory?.canGoForward())
     at.view.webContents.navigationHistory.goForward();
 });
 onWin('reload', () => {
@@ -2115,7 +2129,7 @@ onWin('reload', () => {
 });
 onWin('stop', () => {
   const at = activeTab();
-  if (at) at.view.webContents.stop();
+  if (at && at.view) at.view.webContents.stop();
 });
 onWin('go-home', goHome);
 onWin('ready', () => {
@@ -2128,7 +2142,7 @@ onWin('ready', () => {
 });
 onWin('zoom', (_e, dir) => {
   const at = activeTab();
-  if (!at) return;
+  if (!at || !at.view) return;
   const wc = at.view.webContents;
   if (dir === 'reset') wc.setZoomLevel(0);
   else wc.setZoomLevel(wc.getZoomLevel() + (dir === 'in' ? 0.5 : -0.5));
@@ -2358,7 +2372,7 @@ onWin('bookmark:remove', (_e, url) => {
 // --- IPC: find-in-page ---
 onWin('find:query', (_e, { text, forward }) => {
   const at = activeTab();
-  if (!at) return;
+  if (!at || !at.view) return;
   S.findText = text || '';
   if (!S.findText) {
     at.view.webContents.stopFindInPage('clearSelection');
@@ -2368,7 +2382,7 @@ onWin('find:query', (_e, { text, forward }) => {
 });
 onWin('find:next', (_e, forward) => {
   const at = activeTab();
-  if (at && S.findText) at.view.webContents.findInPage(S.findText, { forward, findNext: true });
+  if (at && at.view && S.findText) at.view.webContents.findInPage(S.findText, { forward, findNext: true });
 });
 onWin('find:close', hideFind);
 onWin('find:show', showFind);
@@ -2486,7 +2500,7 @@ onWin('ai:to-sidebar', (_e, data) => {
   const at = activeTab();
   if (at) {
     at.onAIPage = false;
-    if (!at.view.webContents.getURL()) at.onHero = true;
+    if (!at.view || !at.view.webContents.getURL()) at.onHero = true;
   }
   updateContentVisibility();
   sendState();
@@ -3026,6 +3040,7 @@ onWin('hero:search', (_e, { engine, query }) => {
     at.onHero = false;
     at.onAIPage = false;
     S.settingsOpen = false;
+    ensureTabView(at);
     at.view.webContents.loadURL(buildSearchUrl(engine, query.trim()));
     updateContentVisibility();
   }
@@ -3037,6 +3052,7 @@ onWin('hero:open', (_e, { url }) => {
     at.onHero = false;
     at.onAIPage = false;
     S.settingsOpen = false;
+    ensureTabView(at);
     at.view.webContents.loadURL(target);
     updateContentVisibility();
   }
