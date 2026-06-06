@@ -544,3 +544,24 @@ browser-action-list,
   --browser-action-padding: 4px;
   --browser-action-button-size: 28px;
 }
+
+/* Memory/performance toolbar button: a small gauge icon */
+.perf-ico {
+  display: inline-block;
+  width: 15px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+  position: relative;
+  opacity: 0.92;
+}
+.perf-ico::after {
+  content: '';
+  position: absolute;
+  left: 1.5px;
+  top: 1.5px;
+  bottom: 1.5px;
+  width: 6px;
+  background: currentColor;
+  border-radius: 1px;
+}

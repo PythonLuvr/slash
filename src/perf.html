@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'" />
+    <title>Slash Performance</title>
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="perf.css" />
+  </head>
+  <body>
+    <div id="panel">
+      <div class="phead">
+        <span class="ptitle">Memory</span>
+        <span id="mem-now" class="pnow">&mdash;</span>
+      </div>
+
+      <div class="gauge">
+        <div class="gauge-track">
+          <div id="gauge-fill" class="gauge-fill"></div>
+          <div id="gauge-cap" class="gauge-cap" title="Your limit"></div>
+        </div>
+        <div class="gauge-foot">
+          <span id="tab-count">0 tabs</span>
+          <span id="sleep-count" class="muted"></span>
+        </div>
+      </div>
+
+      <label class="row toggle-row">
+        <span class="row-label">Limit memory</span>
+        <span class="switch"><input type="checkbox" id="limiter-on" /><span class="slider"></span></span>
+      </label>
+
+      <div id="cap-block" class="cap-block">
+        <div class="cap-head">
+          <span class="row-label">Cap</span>
+          <span id="cap-text" class="cap-text">500 MB</span>
+        </div>
+        <input type="range" id="cap-slider" min="500" max="4000" step="250" value="500" aria-label="Memory cap" />
+        <div class="cap-scale"><span>500 MB</span><span>Lean</span><span class="cap-scale-end">4 GB</span></div>
+      </div>
+
+      <p class="hint">
+        Over the cap, the least-recently-used background tabs sleep to free memory.
+        They reload instantly when you click them. Higher cap keeps more tabs loaded.
+      </p>
+    </div>
+    <script src="perf.js"></script>
+  </body>
+</html>

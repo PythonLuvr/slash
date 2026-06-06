@@ -155,6 +155,7 @@ window.slash.onState((s) => {
     reload.innerHTML = s.loading ? '&#10005;' : '&#10227;';
   }
   $('ai').classList.toggle('active', !!s.aiOpen);
+  $('perf').classList.toggle('active', !!s.perfOpen);
   const star = $('star');
   star.innerHTML = s.bookmarked ? '&#9733;' : '&#9734;';
   star.classList.toggle('on', !!s.bookmarked);
@@ -240,6 +241,7 @@ window.slash.onFocusOmnibox(() => {
 siteinfo.addEventListener('click', () => window.slash.togglePop('siteinfo'));
 $('star').addEventListener('click', () => window.slash.toggleBookmark());
 $('ai').addEventListener('click', () => window.slash.toggleAI());
+$('perf').addEventListener('click', () => window.slash.togglePerf());
 $('menu-btn').addEventListener('click', () => window.slash.togglePop('menu'));
 $('profile').addEventListener('click', () => window.slash.togglePop('profile'));
 $('downloads').addEventListener('click', () => window.slash.togglePop('downloads'));

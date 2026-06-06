@@ -64,6 +64,7 @@ const BASE_CHROME = TABSTRIP_HEIGHT + TOOLBAR_HEIGHT + BOOKMARKS_HEIGHT;
 const FIND_W = 360;
 const FIND_HEIGHT = 44;
 const AI_WIDTH = 400;
+const PERF_WIDTH = 268; // left performance/memory panel
 const CTX_WIDTH = 244;
 const CTX_ROW = 34; // .pop-item height in context.css
 const CTX_SEP = 11; // .pop-sep height + margins
@@ -659,6 +660,7 @@ function sendState() {
   const onAIPage = !!(at && at.onAIPage);
   const realPage = at && !onHero && !onAIPage;
   S.chromeView.webContents.send('state', {
+    perfOpen: S.perfOpen,
     mode: onAIPage ? 'aipage' : onHero ? 'hero' : 'page',
     aiOpen: S.aiOpen,
     url: onAIPage ? 'slash://ai' : realPage ? at.view.webContents.getURL() : '',
@@ -713,14 +715,17 @@ function layout() {
   S.chromeView.setBounds({ x: 0, y: 0, width, height: S.CHROME_HEIGHT });
   const top = S.CHROME_HEIGHT;
   const ch = Math.max(0, height - S.CHROME_HEIGHT);
-  const aiW = S.aiOpen ? Math.min(AI_WIDTH, Math.floor(width * 0.5)) : 0;
-  const mainW = Math.max(0, width - aiW);
-  S.heroView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  if (S.interstitialView) S.interstitialView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  if (S.settingsView) S.settingsView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  if (S.aiPageView) S.aiPageView.setBounds({ x: 0, y: top, width: mainW, height: ch });
-  for (const t of S.tabs) if (t.view) t.view.setBounds({ x: 0, y: top, width: mainW, height: ch });
+  const perfW = S.perfOpen ? Math.min(PERF_WIDTH, Math.floor(width * 0.5)) : 0;
+  const aiW = S.aiOpen ? Math.min(AI_WIDTH, Math.floor((width - perfW) * 0.5)) : 0;
+  const mainX = perfW; // content starts to the right of the left panel
+  const mainW = Math.max(0, width - aiW - perfW);
+  S.heroView.setBounds({ x: mainX, y: top, width: mainW, height: ch });
+  if (S.interstitialView) S.interstitialView.setBounds({ x: mainX, y: top, width: mainW, height: ch });
+  if (S.settingsView) S.settingsView.setBounds({ x: mainX, y: top, width: mainW, height: ch });
+  if (S.aiPageView) S.aiPageView.setBounds({ x: mainX, y: top, width: mainW, height: ch });
+  for (const t of S.tabs) if (t.view) t.view.setBounds({ x: mainX, y: top, width: mainW, height: ch });
   if (S.aiView) S.aiView.setBounds({ x: width - aiW, y: top, width: aiW, height: ch });
+  if (S.perfView) S.perfView.setBounds({ x: 0, y: top, width: perfW, height: ch });
   if (S.popKind && S.popoverView) {
     const s = POP_SIZES[S.popKind];
     const { x, y } = popoverPos(S.popKind, s, width);
@@ -792,7 +797,7 @@ function closeSettingsPage() {
 // Keep the toolbar and AI panel above all tab content. Remove-then-add so a
 // re-stack can never duplicate a child view.
 function raiseChrome() {
-  for (const v of [S.aiView, S.chromeView, S.popoverView, S.findView, S.ctxView, S.permView]) {
+  for (const v of [S.aiView, S.perfView, S.chromeView, S.popoverView, S.findView, S.ctxView, S.permView]) {
     if (!v) continue;
     S.win.contentView.removeChildView(v);
     S.win.contentView.addChildView(v);
@@ -1398,6 +1403,16 @@ function toggleAI(force) {
   sendState();
 }
 
+// Left memory/performance panel (Opera GX style).
+function togglePerf(force) {
+  S.perfOpen = typeof force === 'boolean' ? force : !S.perfOpen;
+  if (S.perfOpen) ensureView('perfView');
+  if (S.perfView) S.perfView.setVisible(S.perfOpen);
+  layout();
+  if (S.perfOpen && S.perfView) S.perfView.webContents.focus();
+  sendState();
+}
+
 // --- Keyboard, attached to every view ---
 function attachShortcuts(wc) {
   wc.on('before-input-event', (event, input) => {
@@ -1444,6 +1459,7 @@ const VIEW_DEFS = {
   heroView: ['hero-preload.js', 'hero.html'],
   chromeView: ['preload.js', 'index.html'],
   aiView: ['ai-preload.js', 'ai.html'],
+  perfView: ['perf-preload.js', 'perf.html'],
   aiPageView: ['ai-preload.js', 'ai-page.html'],
   settingsView: ['settings-preload.js', 'settings.html'],
   interstitialView: ['interstitial-preload.js', 'interstitial.html'],
@@ -1526,6 +1542,7 @@ function createBrowserWindow(opts = {}) {
   W.permActive = null;
   W.permQueue = [];
   W.aiOpen = false;
+  W.perfOpen = false;
   W.infobarOpen = false;
   W.CHROME_HEIGHT = BASE_CHROME;
   W.tabMenuTarget = null;
@@ -2039,7 +2056,7 @@ function windowFromEvent(e) {
   if (wc) {
     for (const W of windows) {
       const views = [
-        W.chromeView, W.heroView, W.aiView, W.aiPageView, W.popoverView,
+        W.chromeView, W.heroView, W.aiView, W.perfView, W.aiPageView, W.popoverView,
         W.findView, W.ctxView, W.permView, W.interstitialView, W.settingsView,
       ];
       if (views.some((v) => v && v.webContents === wc)) return W;
@@ -2452,6 +2469,7 @@ onWin('tab:action', (_e, action) => {
 
 // --- IPC: AI panel ---
 onWin('toggle-ai', () => toggleAI());
+onWin('toggle-perf', () => togglePerf());
 onWin('open-ai', () => toggleAI(true));
 onWin('ai:send', (e, payload) => runAI(payload, e.sender));
 

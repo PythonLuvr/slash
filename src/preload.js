@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('slash', {
   stop: () => ipcRenderer.send('stop'),
   goHome: () => ipcRenderer.send('go-home'),
   toggleAI: () => ipcRenderer.send('toggle-ai'),
+  togglePerf: () => ipcRenderer.send('toggle-perf'),
   openSettings: () => ipcRenderer.send('open-settings'),
   zoom: (dir) => ipcRenderer.send('zoom', dir),
   ready: () => ipcRenderer.send('ready'),
