@@ -81,20 +81,32 @@ function renderTabs(list) {
     mb.className = 't-mb';
     mb.textContent = t.suspended ? 'asleep' : t.mb ? t.mb + ' MB' : '·';
 
-    const btn = document.createElement('button');
-    btn.className = 't-sleep';
-    btn.type = 'button';
-    btn.innerHTML = MOON;
-    btn.title = t.suspended ? 'Already asleep' : t.active ? 'Active tab' : 'Sleep this tab';
-    btn.disabled = t.active || t.suspended;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      window.perf.sleepTab(t.id);
-      setTimeout(poll, 120);
-    });
+    // Trailing control: the active tab can't be slept (it'd blank your view),
+    // suspended tabs wake on click; only background tabs show a sleep moon.
+    let trail;
+    if (t.active) {
+      trail = document.createElement('span');
+      trail.className = 't-tag';
+      trail.textContent = 'active';
+    } else if (t.suspended) {
+      trail = document.createElement('span');
+      trail.className = 't-tag wake';
+      trail.textContent = 'wake';
+    } else {
+      trail = document.createElement('button');
+      trail.className = 't-sleep';
+      trail.type = 'button';
+      trail.innerHTML = MOON;
+      trail.title = 'Sleep this tab';
+      trail.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.perf.sleepTab(t.id);
+        setTimeout(poll, 150);
+      });
+    }
 
     row.addEventListener('click', () => window.perf.activateTab(t.id));
-    row.append(host, mb, btn);
+    row.append(host, mb, trail);
     tabListEl.appendChild(row);
   }
 }

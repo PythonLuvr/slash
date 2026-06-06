@@ -2974,6 +2974,7 @@ handleWin('app:stats', () => {
   }
   const asleep = S.tabs.filter((t) => t.suspended).length;
   const tabList = S.tabs
+    .filter((t) => t.view || t.suspended) // skip blank start-page tabs (no renderer to show or free)
     .map((t) => {
       let mb = 0;
       try {
