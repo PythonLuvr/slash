@@ -7,10 +7,19 @@ The first public release of Slash: an AI-native, private-by-default web browser.
 ### Browsing
 - Multiple windows (Ctrl+N), each fully independent
 - Tabs with pinning, drag-to-reorder, and a right-click menu
-- Idle background tabs are suspended to save memory; a memory readout in the menu
 - Session restore: your open windows and tabs come back next launch
 - Private tabs (Ctrl+Shift+N): in-memory, no history, no traces
 - Bookmarks bar, history, downloads, find-in-page, zoom
+- A clean, unified toolbar icon set and a page-load progress bar
+
+### Performance and memory
+- A dockable memory panel (gauge button in the toolbar): live memory graph,
+  CPU and network meters, and your heaviest tabs with their real RAM
+- A configurable RAM limit (Opera GX style): set a cap and the least-recently-used
+  background tabs sleep to hold it; "Free memory now" sleeps them on demand
+- Idle background tabs are suspended automatically; sleeping tabs show a moon in
+  the strip and reload instantly when clicked
+- Blank "New tab" pages cost no renderer until you navigate
 
 ### Search
 - Seven built-in engines (DuckDuckGo default, Startpage, Brave, Google, Bing,
@@ -50,6 +59,13 @@ The first public release of Slash: an AI-native, private-by-default web browser.
 ### Notes on the upgrade
 - On first launch your existing data is moved into a "default" profile
   automatically (with .bak backups kept), nothing is lost
+
+### Known limitations
+- DRM streaming (Netflix, Spotify, Disney+, Prime) does not play yet; it needs
+  Widevine, which is on the roadmap. Regular video (YouTube, Vimeo, Twitch,
+  embedded HTML5) plays fine.
+- Extension popups (clicking an extension's toolbar icon) are not wired up yet;
+  content blockers and background/content-script extensions work.
 
 ### Notes
 - The installer is currently unsigned (see README). Windows SmartScreen will warn
