@@ -63,6 +63,7 @@ The honest boundary is what makes the rest credible:
 - It cannot make the sites you log into forget you. Sign into Gmail and Google still knows you are on Gmail. Slash kills the browser-level spying and blocks third-party trackers. It does not make the web anonymous.
 - It is not Tor or a VPN. Your network and ISP still see which servers you connect to (DNS is encrypted, the connections are not hidden). A proxy option is on the roadmap, not in yet.
 - Your search engine still sees your searches, and your chosen AI provider sees whatever the assistant sends it when you ask it to do something. That only happens on your request, never in the background.
+- It cannot stream Netflix or Disney+ in 1080p or 4K. Paid streaming plays, but at software-DRM quality (roughly SD to 720p), because high-definition DRM needs hardware support (Widevine L1) that only OS-native browsers and devices get. Music, YouTube, and non-DRM video are full quality.
 
 Slash removes the browser as the surveillance machine and shields you from trackers. It does not pretend to make you invisible.
 

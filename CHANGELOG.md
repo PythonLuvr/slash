@@ -8,6 +8,10 @@
 - The Widevine CDM is downloaded from Google by Chromium's component updater. This
   is the one component that contacts Google; everything else stays off. See
   PRIVACY.md ("What phones home").
+- Quality note: DRM video is software-level (Widevine L3), so the streaming
+  services cap it below full HD (Netflix around 540p, others vary). 1080p/4K
+  needs hardware DRM (L1), which Electron cannot provide, the same ceiling
+  Firefox hits. Audio, YouTube, and non-DRM video play at full quality.
 
 ## 1.0.0
 
