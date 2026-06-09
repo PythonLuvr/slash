@@ -37,6 +37,10 @@
     "productName": "Slash",
     "copyright": "Copyright © 2026 EJ Redd",
     "afterPack": "scripts/evs-sign.js",
+    "electronDownload": {
+      "mirror": "https://github.com/castlabs/electron-releases/releases/download/",
+      "customDir": "v42.3.3+wvcus"
+    },
     "directories": {
       "output": "dist",
       "buildResources": "build"
