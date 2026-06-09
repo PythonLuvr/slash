@@ -21,6 +21,16 @@ cookies + referrer), item 9 (clear-data + private window), item 14 (AI
 send-page consent UI). The settings page now has homes for clear-data and a
 private-window launcher when those land.
 
+## What phones home (the honest exception)
+
+Slash ships with Chromium's background networking off. The one deliberate
+exception is **Widevine DRM**, on by default so paid streaming (Netflix,
+Spotify, Disney+, Prime) plays. For that, Chromium's component updater downloads
+the Widevine CDM from Google on first run and refreshes it periodically. That is
+the only component that contacts Google. Everything else stays off: no telemetry,
+no variations/Finch, no Safe Browsing pings, no sync, no account. The CDM only
+handles DRM playback; it does not see your browsing.
+
 ## Tier 1, quick wins with real impact
 
 ### 1. Private search by default (DuckDuckGo)

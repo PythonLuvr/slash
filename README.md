@@ -50,7 +50,7 @@ And because "trust me" is not good enough for the app that sees everything, the 
 Security here is layered, not a single feature:
 
 - **A locked-down shell.** Web pages run sandboxed and context-isolated, with no Node access and no `webview` tag, behind a strict content-security-policy on every Slash UI page. The part that renders the web cannot reach your operating system, and a hacked page cannot escape into the browser's own UI.
-- **The open engine without the surveillance layer.** Slash renders with Chromium, which is open source. What turns "Chromium" into "Chrome" is the Google services layered on top (sign-in, sync, telemetry, Safe Browsing pings). Slash uses the raw engine and leaves that layer off, configured not to phone home.
+- **The open engine without the surveillance layer.** Slash renders with Chromium, which is open source. What turns "Chromium" into "Chrome" is the Google services layered on top (sign-in, sync, telemetry, Safe Browsing pings). Slash uses the raw engine and leaves that layer off, configured not to phone home. The one deliberate exception is the Widevine DRM module, downloaded from Google so paid streaming plays; see [`PRIVACY.md`](PRIVACY.md).
 - **Network hardening by default.** HTTPS-only with automatic upgrade, encrypted DNS, and tracker/ad blocking at the network layer.
 - **Deny-by-default permissions.** Sensitive capabilities are gated behind a per-site prompt.
 - **Local-only data.** History, bookmarks, passwords, and keys live on your device. Passwords and keys are encrypted with the OS keystore. There is no cloud sync because there is no cloud.

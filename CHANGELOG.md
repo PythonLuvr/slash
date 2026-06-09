@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0
+
+### Streaming
+- Widevine DRM support, on by default: Netflix, Spotify, Disney+, Prime, and
+  other paid streaming now play (built on castlabs Electron, production VMP-signed)
+- The Widevine CDM is downloaded from Google by Chromium's component updater. This
+  is the one component that contacts Google; everything else stays off. See
+  PRIVACY.md ("What phones home").
+
 ## 1.0.0
 
 The first public release of Slash: an AI-native, private-by-default web browser.

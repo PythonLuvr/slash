@@ -1,7 +1,7 @@
 {
   "name": "slash",
   "productName": "Slash",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Slash, a personal AI-native web browser",
   "main": "src/main.js",
   "scripts": {
@@ -36,6 +36,7 @@
     "appId": "com.pythonluvr.slash",
     "productName": "Slash",
     "copyright": "Copyright © 2026 EJ Redd",
+    "afterPack": "scripts/evs-sign.js",
     "directories": {
       "output": "dist",
       "buildResources": "build"
