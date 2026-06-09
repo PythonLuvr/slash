@@ -1,4 +1,4 @@
-const { app, BaseWindow, WebContentsView, ipcMain, Menu, session, shell, clipboard, dialog, net } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain, Menu, session, shell, clipboard, dialog, net, components } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -26,8 +26,10 @@ if (process.platform === 'win32') app.setAppUserModelId('com.pythonluvr.slash');
 // Chromium's background network chatter (component/variations updates, domain
 // reliability, push messaging, crash upload) so the engine talks only to the
 // sites you visit, your search engine, your DoH resolver, and your AI provider.
-app.commandLine.appendSwitch('disable-background-networking');
-app.commandLine.appendSwitch('disable-component-update');
+// NOTE (widevine spike): these two block the Widevine component updater. Dropped
+// to let the CDM download; revisit the privacy trade-off before shipping.
+// app.commandLine.appendSwitch('disable-background-networking');
+// app.commandLine.appendSwitch('disable-component-update');
 app.commandLine.appendSwitch('disable-domain-reliability');
 app.commandLine.appendSwitch('disable-breakpad'); // no crash-dump upload
 app.commandLine.appendSwitch(
@@ -2006,6 +2008,13 @@ async function runApiAI({ conversationId, provider, transcript }, sender) {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
+  // Load the Widevine CDM in the background (castlabs Electron) so DRM streaming
+  // (Netflix, Spotify, etc.) can play. No-op / harmless on stock Electron.
+  try {
+    if (components && components.whenReady) components.whenReady().catch(() => {});
+  } catch {
+    /* stock electron: no Widevine */
+  }
   // One-time: move existing single-profile data into profiles/default/ before
   // anything reads it. Idempotent; keeps .bak copies.
   try {
