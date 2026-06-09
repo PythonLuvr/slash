@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0
+
+### Extensions
+- Extension toolbar: installed extensions show a clickable icon in the toolbar,
+  and clicking it opens the extension's popup (uBlock, password managers, and the
+  like), scoped per profile.
+- Popups open on real pages. On the blank new-tab page there is no page for an
+  extension to attach to, so the popup waits until you are on a site, the same as
+  most browsers.
+
 ## 1.1.0
 
 ### Streaming
