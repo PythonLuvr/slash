@@ -39,12 +39,12 @@ body {
   color: var(--ink);
 }
 
-/* Live memory graph */
+/* Live memory graph (the primary memory visual) */
 .spark {
   width: 100%;
-  height: 46px;
+  height: 54px;
   display: block;
-  margin: -2px 0 2px;
+  margin: 0;
 }
 .spark-line {
   fill: none;
@@ -66,47 +66,26 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
-/* Gauge */
-.gauge-track {
-  position: relative;
-  height: 10px;
-  border-radius: 6px;
-  background: var(--raised);
-  border: 1px solid var(--border);
-  overflow: hidden;
-}
-.gauge-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0%;
-  border-radius: 6px;
-  background: var(--accent);
-  transition: width 0.5s ease, background 0.3s ease;
-}
-.gauge-fill.over {
-  background: #e6883c;
-}
-.gauge-cap {
-  position: absolute;
-  top: -2px;
-  bottom: -2px;
-  width: 2px;
-  background: var(--ink);
-  opacity: 0.5;
-  left: 68%;
-}
-.gauge-cap.hidden {
-  display: none;
-}
-.gauge-foot {
-  display: flex;
-  justify-content: space-between;
+/* Memory subline (tab + asleep counts) */
+.meta {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--muted);
-}
-.muted {
   color: var(--faint);
+  margin-top: -4px;
+}
+/* Over-cap: the graph and number shift to amber */
+.pnow.over {
+  color: #e6883c;
+}
+.spark.over .spark-line {
+  stroke: #e6883c;
+}
+.spark.over .spark-area {
+  fill: #e6883c;
+  opacity: 0.16;
+}
+.spark-cap.hidden {
+  display: none;
 }
 
 /* CPU + Net meters */

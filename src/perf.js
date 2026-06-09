@@ -1,7 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const memNow = $('mem-now');
-const fill = $('gauge-fill');
-const gaugeCap = $('gauge-cap');
+const spark = $('spark');
 const tabCount = $('tab-count');
 const sleepCount = $('sleep-count');
 const limiterOn = $('limiter-on');
@@ -39,17 +38,17 @@ function drawSpark(cap) {
   const capScale = cap ? cap / 0.68 : 0;
   const max = Math.max(capScale, ...hist, 1) * 1.05;
   const n = hist.length;
-  const pts = hist.map((m, i) => [(i / (n - 1)) * 100, 34 - (m / max) * 34]);
+  const pts = hist.map((m, i) => [(i / (n - 1)) * 100, 40 - (m / max) * 40]);
   const d = pts.map(([x, y], i) => (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1)).join(' ');
   sparkLine.setAttribute('d', d);
-  sparkArea.setAttribute('d', d + ' L 100 34 L 0 34 Z');
+  sparkArea.setAttribute('d', d + ' L 100 40 L 0 40 Z');
   if (cap) {
-    const y = (34 - (cap / max) * 34).toFixed(1);
+    const y = (40 - (cap / max) * 40).toFixed(1);
     sparkCap.setAttribute('y1', y);
     sparkCap.setAttribute('y2', y);
-    sparkCap.style.display = '';
+    sparkCap.classList.remove('hidden');
   } else {
-    sparkCap.style.display = 'none';
+    sparkCap.classList.add('hidden');
   }
 }
 
@@ -114,23 +113,16 @@ function renderTabs(list) {
 function render(s) {
   const mem = s.memMB || 0;
   const cap = s.ramLimitMB || 0;
+  const over = !!cap && mem > cap;
   memNow.textContent = mem + ' MB';
+  memNow.classList.toggle('over', over);
+  spark.classList.toggle('over', over);
   tabCount.textContent = s.tabs + ' tab' + (s.tabs === 1 ? '' : 's');
-  sleepCount.textContent = s.asleep ? s.asleep + ' asleep' : '';
+  sleepCount.textContent = s.asleep ? ' · ' + s.asleep + ' asleep' : '';
 
   hist.push(mem);
   if (hist.length > HMAX) hist.shift();
   drawSpark(cap);
-
-  const scaleMax = cap ? cap / 0.68 : Math.max(mem * 1.25, 1200);
-  fill.style.width = Math.min(100, (mem / scaleMax) * 100) + '%';
-  fill.classList.toggle('over', !!cap && mem > cap);
-  if (cap) {
-    gaugeCap.classList.remove('hidden');
-    gaugeCap.style.left = Math.min(100, (cap / scaleMax) * 100) + '%';
-  } else {
-    gaugeCap.classList.add('hidden');
-  }
 
   const cpu = Math.max(0, s.cpu || 0);
   cpuVal.textContent = cpu + '%';

@@ -15,19 +15,14 @@
         <span id="mem-now" class="pnow">&mdash;</span>
       </div>
 
-      <svg id="spark" class="spark" viewBox="0 0 100 34" preserveAspectRatio="none">
+      <svg id="spark" class="spark" viewBox="0 0 100 40" preserveAspectRatio="none">
         <path id="spark-area" class="spark-area" d="" />
         <path id="spark-line" class="spark-line" d="" />
-        <line id="spark-cap" class="spark-cap" x1="0" y1="0" x2="100" y2="0" />
+        <line id="spark-cap" class="spark-cap hidden" x1="0" y1="0" x2="100" y2="0" />
       </svg>
-
-      <div class="gauge-track">
-        <div id="gauge-fill" class="gauge-fill"></div>
-        <div id="gauge-cap" class="gauge-cap"></div>
-      </div>
-      <div class="gauge-foot">
+      <div id="meta" class="meta">
         <span id="tab-count">0 tabs</span>
-        <span id="sleep-count" class="muted"></span>
+        <span id="sleep-count"></span>
       </div>
 
       <!-- CPU + network meters -->
