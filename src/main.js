@@ -1485,7 +1485,10 @@ const VIEW_DEFS = {
 };
 function makeView(key, visible) {
   const [preload, html] = VIEW_DEFS[key];
-  const v = new WebContentsView({ webPreferences: { ...SECURE_PREFS, preload: path.join(__dirname, preload) } });
+  // The chrome (toolbar) view's preload requires the browser-action element module,
+  // so it runs unsandboxed. Trusted first-party UI; the page still has no Node.
+  const extra = key === 'chromeView' ? { sandbox: false } : {};
+  const v = new WebContentsView({ webPreferences: { ...SECURE_PREFS, ...extra, preload: path.join(__dirname, preload) } });
   S[key] = v;
   S.win.contentView.addChildView(v);
   try { v.setBackgroundColor('#1c1c1f'); } catch { /* older electron */ } // no white flash while loading

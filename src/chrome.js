@@ -347,6 +347,12 @@ window.slash
 // Profile cue: non-default profiles show a colored name pill and tint the avatar
 // ring, so you can tell which profile a window belongs to.
 window.slash.onProfileWindow((p) => {
+  // Point the extensions toolbar at this window's profile session.
+  const ext = $('ext-actions');
+  if (ext && p) {
+    if (p.partition) ext.setAttribute('partition', p.partition);
+    else ext.removeAttribute('partition');
+  }
   const badge = $('profile-badge');
   const av = document.querySelector('#profile .avatar');
   if (p && !p.isDefault) {

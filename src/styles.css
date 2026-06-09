@@ -693,3 +693,12 @@ browser-action-list,
   stroke: none;
   opacity: 0.85;
 }
+
+/* Extension action icons (browser-action-list custom element) */
+.ext-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  --browser-action-button-size: 28px;
+  --browser-action-padding: 1px;
+}
