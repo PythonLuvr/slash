@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.1
+
+### Keyboard shortcuts
+- Added the standard browser shortcuts that were missing: Ctrl+R reloads the
+  current page, Ctrl+P prints it, and Ctrl+= / Ctrl++ / Ctrl+- / Ctrl+0 zoom in,
+  out, and reset. These match the toolbar and right-click menu actions.
+
+### Notes
+- PDFs already open inline (the built-in PDFium viewer), so no change was needed
+  there.
+
 ## 1.2.0
 
 ### Extensions

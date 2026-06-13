@@ -1462,6 +1462,27 @@ function attachShortcuts(wc) {
       S.chromeView.webContents.focus();
       return stop();
     }
+    if (key === 'r') {
+      const at = activeTab();
+      if (at && !at.onHero && at.view) at.view.webContents.reload();
+      return stop();
+    }
+    if (key === 'p') {
+      const at = activeTab();
+      if (at && at.view) at.view.webContents.print();
+      return stop();
+    }
+    // Zoom in/out/reset. Ctrl+= and Ctrl++ both zoom in (so the user does not
+    // need shift); Ctrl+- zooms out; Ctrl+0 resets.
+    if (key === '=' || key === '+' || key === '-' || key === '0') {
+      const at = activeTab();
+      if (at && at.view) {
+        const z = at.view.webContents;
+        if (key === '0') z.setZoomLevel(0);
+        else z.setZoomLevel(z.getZoomLevel() + (key === '-' ? -0.5 : 0.5));
+      }
+      return stop();
+    }
   });
 }
 
