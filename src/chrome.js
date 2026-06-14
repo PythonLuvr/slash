@@ -348,11 +348,7 @@ window.slash
 // ring, so you can tell which profile a window belongs to.
 window.slash.onProfileWindow((p) => {
   // Point the extensions toolbar at this window's profile session.
-  const ext = $('ext-actions');
-  if (ext && p) {
-    if (p.partition) ext.setAttribute('partition', p.partition);
-    else ext.removeAttribute('partition');
-  }
+  if (p) setExtPartition(p.partition || null);
   const badge = $('profile-badge');
   const av = document.querySelector('#profile .avatar');
   if (p && !p.isDefault) {
@@ -367,6 +363,92 @@ window.slash.onProfileWindow((p) => {
     if (av) av.style.boxShadow = '';
   }
 });
+
+// --- Extensions toolbar: pinned action buttons + the puzzle (menu) button ---
+// The live extension list and active tab come from the browser-action bridge;
+// the pinned ids come from main. We render one <button is="browser-action"> per
+// pinned extension and show the puzzle button whenever any are installed.
+const DEFAULT_PARTITION = '_self';
+let extPartition = null; // this window's profile session partition (null = default)
+let extActions = []; // available actions from the bridge: [{ id, ... }]
+let extActiveTab = -1; // active tab id the extensions lib uses (a webContents id)
+let extPinned = []; // pinned extension ids (from main)
+let extListening = false;
+let extObserved = null; // partition currently observed, to avoid double-observing
+
+function extPart() {
+  return extPartition || DEFAULT_PARTITION;
+}
+
+function renderExtToolbar() {
+  const wrap = $('ext-pinned');
+  const menuBtn = $('ext-menu');
+  if (!wrap) return;
+  // Puzzle button appears only once the profile has at least one extension.
+  if (menuBtn) menuBtn.classList.toggle('hidden', extActions.length === 0);
+
+  const wanted = extPinned.filter((id) => extActions.some((a) => a.id === id));
+  const have = new Map(Array.from(wrap.children).map((el) => [el.id, el]));
+  for (const el of have.values()) if (!wanted.includes(el.id)) el.remove();
+  for (const id of wanted) {
+    let btn = have.get(id);
+    if (!btn) {
+      btn = document.createElement('button', { is: 'browser-action' });
+      btn.id = id;
+      btn.className = 'ext-action';
+      wrap.appendChild(btn);
+    }
+    if (extPartition) btn.setAttribute('partition', extPartition);
+    else btn.removeAttribute('partition');
+    btn.setAttribute('tab', String(extActiveTab));
+  }
+}
+
+function ensureExtListening() {
+  if (extListening || !window.browserAction) return;
+  extListening = true;
+  window.browserAction.addEventListener('update', (state) => {
+    if (!state) return;
+    extActions = Array.isArray(state.actions) ? state.actions : [];
+    if (typeof state.activeTabId === 'number') extActiveTab = state.activeTabId;
+    renderExtToolbar();
+  });
+}
+
+function observeExt() {
+  if (!window.browserAction) return;
+  const part = extPart();
+  if (extObserved !== part) {
+    if (extObserved !== null) {
+      try {
+        window.browserAction.removeObserver(extObserved);
+      } catch {
+        /* ignore */
+      }
+    }
+    extObserved = part;
+    window.browserAction.addObserver(part);
+  }
+  Promise.resolve(window.browserAction.getState(part)).catch(() => {});
+}
+
+function setExtPartition(part) {
+  extPartition = part || null;
+  ensureExtListening();
+  observeExt();
+  renderExtToolbar();
+}
+
+window.slash.onExtPins((ids) => {
+  extPinned = Array.isArray(ids) ? ids : [];
+  renderExtToolbar();
+});
+{
+  const menuBtn = $('ext-menu');
+  if (menuBtn) menuBtn.addEventListener('click', () => window.slash.togglePop('extensions'));
+}
+ensureExtListening();
+observeExt();
 
 // Generic infobar strip (main controls the chrome height so it pushes content
 // down rather than overlapping it). Used by the first-run default-browser

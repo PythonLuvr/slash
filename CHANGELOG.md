@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.3.0
+
+### AI conversation starters
+- The AI panel (sidebar and full slash://ai page) now shows quick conversation
+  starters in the empty state: "Summarize this page", "Explain the selected
+  text", "Find the key takeaways". Click one to send it. Add your own with the
+  "+" chip, or remove any with the x on hover. Your set is shared across both
+  views.
+
+### AI can see the page on every provider
+- All three API providers (Anthropic, OpenAI, Google) can now use the browser
+  tools, so page-aware prompts like "Summarize this page" work on any BYOK key,
+  not just the Claude CLI.
+- The Gemini and Codex CLIs get a lighter version: when your message clearly
+  refers to the current page, Slash reads the tab and includes it.
+
+### Extensions: pin what you use
+- Extensions no longer all crowd the toolbar. There's a single Extensions
+  (puzzle) button that lists your installed extensions; pin the ones you want as
+  dedicated toolbar icons and the rest stay in the menu. New extensions start
+  unpinned. Matches how Chrome, Edge, and Firefox handle it.
+
 ## 1.2.1
 
 ### Keyboard shortcuts

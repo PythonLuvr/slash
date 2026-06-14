@@ -184,11 +184,185 @@ async function runAnthropicAgent({ apiKey, model, system, messages, tools, onDel
   }
 }
 
+// --- OpenAI agent loop (function calling) ---
+// One streaming turn. Streams assistant text through onDelta and accumulates
+// any tool calls (their arguments arrive as fragments, keyed by index).
+async function openaiTurn({ apiKey, model, messages, tools, onDelta }) {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + apiKey },
+    body: JSON.stringify({ model, stream: true, messages, tools }),
+  });
+  if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  let text = '';
+  const calls = []; // accumulated by tool_call index
+  await readSSE(res, (data) => {
+    if (data === '[DONE]') return;
+    let evt;
+    try {
+      evt = JSON.parse(data);
+    } catch {
+      return;
+    }
+    const d = evt.choices?.[0]?.delta;
+    if (!d) return;
+    if (d.content) {
+      text += d.content;
+      onDelta(d.content);
+    }
+    if (Array.isArray(d.tool_calls)) {
+      for (const tc of d.tool_calls) {
+        const i = tc.index || 0;
+        if (!calls[i]) calls[i] = { id: '', name: '', args: '' };
+        if (tc.id) calls[i].id = tc.id;
+        if (tc.function?.name) calls[i].name = tc.function.name;
+        if (tc.function?.arguments) calls[i].args += tc.function.arguments;
+      }
+    }
+  });
+  return { text, calls: calls.filter(Boolean) };
+}
+
+// Run a full tool-use conversation against the OpenAI chat completions API.
+async function runOpenAiAgent({ apiKey, model, system, messages, tools, onDelta, onTool, executeTool }) {
+  const oaTools = tools.map((t) => ({
+    type: 'function',
+    function: { name: t.name, description: t.description, parameters: t.input_schema },
+  }));
+  const convo = [{ role: 'system', content: system }, ...messages];
+  for (let turn = 0; turn < 8; turn++) {
+    const { text, calls } = await openaiTurn({ apiKey, model, messages: convo, tools: oaTools, onDelta });
+    const assistant = { role: 'assistant', content: text || null };
+    if (calls.length) {
+      assistant.tool_calls = calls.map((c) => ({
+        id: c.id,
+        type: 'function',
+        function: { name: c.name, arguments: c.args || '{}' },
+      }));
+    }
+    convo.push(assistant);
+    if (!calls.length) break;
+    for (const c of calls) {
+      let input = {};
+      try {
+        input = c.args ? JSON.parse(c.args) : {};
+      } catch {
+        input = {};
+      }
+      if (onTool) onTool({ phase: 'start', name: c.name, input });
+      let result;
+      try {
+        result = await executeTool(c.name, input);
+      } catch (e) {
+        result = 'Tool error: ' + (e && e.message ? e.message : String(e));
+      }
+      if (onTool) onTool({ phase: 'end', name: c.name, result });
+      convo.push({ role: 'tool', tool_call_id: c.id, content: String(result).slice(0, 12000) });
+    }
+  }
+}
+
+// --- Google Gemini agent loop (function calling) ---
+// Gemini's function declarations use an OpenAPI-subset schema whose types are
+// upper-cased. Translate our Anthropic-style input_schema into it.
+function toGeminiSchema(schema) {
+  if (!schema || typeof schema !== 'object') return schema;
+  const out = {};
+  if (schema.type) out.type = String(schema.type).toUpperCase();
+  if (schema.description) out.description = schema.description;
+  if (schema.properties) {
+    out.properties = {};
+    for (const k of Object.keys(schema.properties)) out.properties[k] = toGeminiSchema(schema.properties[k]);
+  }
+  if (Array.isArray(schema.required)) out.required = schema.required;
+  if (schema.items) out.items = toGeminiSchema(schema.items);
+  return out;
+}
+
+async function geminiTurn({ apiKey, model, system, contents, decls, onDelta }) {
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}` +
+    `:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
+  const body = {
+    contents,
+    tools: [{ function_declarations: decls }],
+    system_instruction: { parts: [{ text: system }] },
+  };
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Google API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  let text = '';
+  const fcalls = []; // { name, args }
+  await readSSE(res, (data) => {
+    let evt;
+    try {
+      evt = JSON.parse(data);
+    } catch {
+      return;
+    }
+    const parts = evt.candidates?.[0]?.content?.parts;
+    if (!parts) return;
+    for (const p of parts) {
+      if (typeof p.text === 'string') {
+        text += p.text;
+        onDelta(p.text);
+      } else if (p.functionCall) {
+        fcalls.push(p.functionCall);
+      }
+    }
+  });
+  return { text, fcalls };
+}
+
+async function runGoogleAgent({ apiKey, model, system, messages, tools, onDelta, onTool, executeTool }) {
+  const decls = tools.map((t) => {
+    const fn = { name: t.name, description: t.description };
+    // Gemini rejects an empty parameters object, so omit it for no-arg tools.
+    if (t.input_schema?.properties && Object.keys(t.input_schema.properties).length) {
+      fn.parameters = toGeminiSchema(t.input_schema);
+    }
+    return fn;
+  });
+  const contents = messages.map((m) => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }));
+  for (let turn = 0; turn < 8; turn++) {
+    const { text, fcalls } = await geminiTurn({ apiKey, model, system, contents, decls, onDelta });
+    const modelParts = [];
+    if (text) modelParts.push({ text });
+    for (const fc of fcalls) modelParts.push({ functionCall: fc });
+    contents.push({ role: 'model', parts: modelParts.length ? modelParts : [{ text: '' }] });
+    if (!fcalls.length) break;
+    // Function results go back as a user turn of functionResponse parts.
+    const respParts = [];
+    for (const fc of fcalls) {
+      const input = fc.args || {};
+      if (onTool) onTool({ phase: 'start', name: fc.name, input });
+      let result;
+      try {
+        result = await executeTool(fc.name, input);
+      } catch (e) {
+        result = 'Tool error: ' + (e && e.message ? e.message : String(e));
+      }
+      if (onTool) onTool({ phase: 'end', name: fc.name, result });
+      respParts.push({
+        functionResponse: { name: fc.name, response: { result: String(result).slice(0, 12000) } },
+      });
+    }
+    contents.push({ role: 'user', parts: respParts });
+  }
+}
+
 // kind -> streaming function. kind matches the apiKeys / apiModels keys.
+// Kept for any non-agent callers; the AI panel now uses the agent loops.
 const STREAMERS = {
   anthropic: streamAnthropic,
   openai: streamOpenAI,
   google: streamGoogle,
 };
 
-module.exports = { STREAMERS, runAnthropicAgent };
+module.exports = { STREAMERS, runAnthropicAgent, runOpenAiAgent, runGoogleAgent };

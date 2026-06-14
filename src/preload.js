@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Make the <browser-action-list> element (extension toolbar icons + popups)
-// available in the chrome UI. Best-effort.
+// Make the <browser-action> element (pinned extension icons + popups) and the
+// browserAction bridge available in the chrome UI. Best-effort.
 try {
   require('electron-chrome-extensions/browser-action').injectBrowserAction();
 } catch {
@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('slash', {
   // events
   onState: (cb) => ipcRenderer.on('state', (_e, state) => cb(state)),
   onProfileWindow: (cb) => ipcRenderer.on('profile-window', (_e, p) => cb(p)),
+  onExtPins: (cb) => ipcRenderer.on('ext:pins', (_e, ids) => cb(ids)),
   onTabs: (cb) => ipcRenderer.on('tabs', (_e, list) => cb(list)),
   onBookmarks: (cb) => ipcRenderer.on('bookmarks', (_e, list) => cb(list)),
   onFocusOmnibox: (cb) => ipcRenderer.on('focus-omnibox', () => cb()),

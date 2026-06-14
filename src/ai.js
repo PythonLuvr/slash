@@ -72,6 +72,90 @@ async function loadSettings() {
   settings = await window.ai.getSettings();
   if (settings.selection) selection = settings.selection;
   updatePickerLabel();
+  renderStarters();
+}
+
+// --- Conversation starters (empty-state quick prompts) ---
+// A fixed default set the user can extend or trim. Stored app-level so the
+// sidebar and the full slash://ai page share the same list. Clicking one fills
+// the composer and sends. Defaults lean page-aware: on the default Claude CLI,
+// "Summarize this page" works because the model reads the active tab via the
+// read_current_page browser tool.
+const DEFAULT_STARTERS = ['Summarize this page', 'Explain the selected text', 'Find the key takeaways'];
+
+function getStarters() {
+  return settings && Array.isArray(settings.chatStarters) ? settings.chatStarters : DEFAULT_STARTERS.slice();
+}
+function persistStarters(list) {
+  if (!settings) settings = {};
+  settings.chatStarters = list;
+  window.ai.saveSettings({ chatStarters: list });
+}
+function renderStarters() {
+  const box = $('starters');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const text of getStarters()) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'starter-chip';
+    const label = document.createElement('span');
+    label.className = 'sc-label';
+    label.textContent = text;
+    chip.appendChild(label);
+    const del = document.createElement('span');
+    del.className = 'sc-del';
+    del.textContent = '×';
+    del.title = 'Remove starter';
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      persistStarters(getStarters().filter((s) => s !== text));
+      renderStarters();
+    });
+    chip.appendChild(del);
+    chip.addEventListener('click', () => {
+      input.value = text;
+      sendAI();
+    });
+    box.appendChild(chip);
+  }
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'starter-add';
+  add.textContent = '+';
+  add.title = 'Add a starter';
+  add.addEventListener('click', () => openStarterInput(box, add));
+  box.appendChild(add);
+}
+function openStarterInput(box, add) {
+  if (box.querySelector('.sc-input')) return;
+  add.classList.add('hidden');
+  const field = document.createElement('input');
+  field.type = 'text';
+  field.className = 'sc-input';
+  field.placeholder = 'New starter...';
+  field.maxLength = 120;
+  box.appendChild(field);
+  field.focus();
+  let done = false;
+  const commit = () => {
+    if (done) return;
+    done = true;
+    const v = field.value.trim();
+    if (v && !getStarters().includes(v)) persistStarters(getStarters().concat([v]));
+    renderStarters();
+  };
+  field.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      done = true;
+      renderStarters();
+    }
+  });
+  field.addEventListener('blur', commit);
 }
 
 // --- Picker menu (provider rows + CLI/API toggle) ---

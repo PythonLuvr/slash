@@ -30,8 +30,8 @@ function profileSettingsPath(profileId) {
 }
 
 // Which keys are shared app-wide vs stored per profile.
-const PROFILE_KEYS = ['searchEngine', 'heroEngines', 'customEngines', 'pwBlocked', 'extensions'];
-const APP_KEYS = ['selection', 'apiKeys', 'apiModels', 'accent', 'doh', 'httpsOnly', 'blockAds', 'seenDefaultPrompt', 'updatesEnabled', 'ramLimitMB'];
+const PROFILE_KEYS = ['searchEngine', 'heroEngines', 'customEngines', 'pwBlocked', 'extensions', 'pinnedExtensions'];
+const APP_KEYS = ['selection', 'apiKeys', 'apiModels', 'accent', 'doh', 'httpsOnly', 'blockAds', 'seenDefaultPrompt', 'updatesEnabled', 'ramLimitMB', 'chatStarters'];
 
 // Sensible, editable defaults. Nothing here is secret or user-specific.
 const DEFAULTS = {
@@ -48,12 +48,16 @@ const DEFAULTS = {
   customEngines: [], // user-added engines: { id, label, domain, url(with %s) }
   pwBlocked: [], // hosts where the user chose "Never" save a password
   extensions: [], // loaded Chrome extension folder paths (reloaded on launch)
+  pinnedExtensions: [], // extension ids pinned to the toolbar (rest live in the menu)
   doh: true, // DNS-over-HTTPS on by default
   httpsOnly: true, // upgrade http -> https, warn on failure
   blockAds: true, // EasyList/EasyPrivacy tracker + ad blocking
   seenDefaultPrompt: false, // shown the first-run "set as default" prompt yet
   updatesEnabled: true, // check for + offer updates (user can ignore further updates)
   ramLimitMB: 500, // RAM cap; over it, idle background tabs are discarded. 0 = unlimited
+  // AI conversation starters shown in the empty/landing state (sidebar + full page).
+  // Editable by the user; defaults lean page-aware (Claude CLI reads the active tab).
+  chatStarters: ['Summarize this page', 'Explain the selected text', 'Find the key takeaways'],
 };
 
 const ENC_PREFIX = 'enc:v1:';
@@ -130,6 +134,8 @@ function readSettings(profileId = DEFAULT_PROFILE) {
     customEngines: arr(pick('customEngines'), DEFAULTS.customEngines),
     pwBlocked: arr(pick('pwBlocked'), DEFAULTS.pwBlocked),
     extensions: arr(pick('extensions'), DEFAULTS.extensions),
+    pinnedExtensions: arr(pick('pinnedExtensions'), DEFAULTS.pinnedExtensions),
+    chatStarters: arr(appRaw.chatStarters, DEFAULTS.chatStarters),
     doh: bool(appRaw.doh, DEFAULTS.doh),
     httpsOnly: bool(appRaw.httpsOnly, DEFAULTS.httpsOnly),
     blockAds: bool(appRaw.blockAds, DEFAULTS.blockAds),
@@ -151,6 +157,8 @@ function writeSettings(patch, profileId = DEFAULT_PROFILE) {
     customEngines: Array.isArray(patch.customEngines) ? patch.customEngines : cur.customEngines,
     pwBlocked: Array.isArray(patch.pwBlocked) ? patch.pwBlocked : cur.pwBlocked,
     extensions: Array.isArray(patch.extensions) ? patch.extensions : cur.extensions,
+    pinnedExtensions: Array.isArray(patch.pinnedExtensions) ? patch.pinnedExtensions : cur.pinnedExtensions,
+    chatStarters: Array.isArray(patch.chatStarters) ? patch.chatStarters : cur.chatStarters,
     doh: typeof patch.doh === 'boolean' ? patch.doh : cur.doh,
     httpsOnly: typeof patch.httpsOnly === 'boolean' ? patch.httpsOnly : cur.httpsOnly,
     blockAds: typeof patch.blockAds === 'boolean' ? patch.blockAds : cur.blockAds,

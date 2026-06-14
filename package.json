@@ -1,7 +1,7 @@
 {
   "name": "slash",
   "productName": "Slash",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Slash, a personal AI-native web browser",
   "main": "src/main.js",
   "scripts": {

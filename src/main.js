@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const { spawnSync, spawn } = require('child_process');
 const { readSettings, writeSettings } = require('./lib/settings');
-const { STREAMERS, runAnthropicAgent } = require('./lib/api');
+const { runAnthropicAgent, runOpenAiAgent, runGoogleAgent } = require('./lib/api');
 const { startMcpServer } = require('./lib/mcp-server');
 const { autoUpdater } = require('electron-updater');
 const store = require('./lib/store');
@@ -102,6 +102,7 @@ const POP_SIZES = {
   setup: { w: 344, h: 440 },
   enginepick: { w: 216, h: 344 },
   tabmenu: { w: 188, h: 172 },
+  extensions: { w: 296, h: 360 },
 };
 
 // Top-right cluster popovers anchor right; site-info anchors under the omnibox;
@@ -1506,9 +1507,10 @@ const VIEW_DEFS = {
 };
 function makeView(key, visible) {
   const [preload, html] = VIEW_DEFS[key];
-  // The chrome (toolbar) view's preload requires the browser-action element module,
-  // so it runs unsandboxed. Trusted first-party UI; the page still has no Node.
-  const extra = key === 'chromeView' ? { sandbox: false } : {};
+  // The chrome (toolbar) and popover views' preloads require the browser-action
+  // element module (extension icons + popups in the toolbar and the extensions
+  // menu), so they run unsandboxed. Trusted first-party UI; the page has no Node.
+  const extra = key === 'chromeView' || key === 'popoverView' ? { sandbox: false } : {};
   const v = new WebContentsView({ webPreferences: { ...SECURE_PREFS, ...extra, preload: path.join(__dirname, preload) } });
   S[key] = v;
   S.win.contentView.addChildView(v);
@@ -1743,6 +1745,25 @@ function buildCliPrompt(transcript) {
   return SYSTEM + '\n\n' + lines.join('\n') + '\nAssistant:';
 }
 
+// Page-context fallback for CLIs without browser tools (everything but Claude,
+// which uses the real read_current_page tool). When the user's latest message
+// clearly refers to the current page, read it and prepend it so any model can
+// answer. Must be called before any await so the ambient window context (S) is
+// still the requesting window when activeTab() is read.
+const PAGE_HINT =
+  /\b(this page|the page|current page|this article|this site|this tab|selected text|selection|summari[sz]e|key takeaways|tl;?dr)\b/i;
+async function maybePageContext(transcript) {
+  const last = (transcript || []).filter((m) => m.role === 'user').pop();
+  if (!last || !PAGE_HINT.test(last.text || '')) return null;
+  try {
+    const text = await executeTool('read_current_page', {});
+    if (!text || /^No web page/.test(text)) return null;
+    return "Context from the user's active browser tab (use it to answer):\n\n" + String(text).slice(0, 6000);
+  } catch {
+    return null;
+  }
+}
+
 function buildApiMessages(transcript) {
   const msgs = (transcript || []).map((m) => ({ role: m.role, content: m.text }));
   if (msgs.length && msgs[0].role === 'user') {
@@ -1959,6 +1980,9 @@ function cliArgsFor(provider) {
 
 async function runCliAI({ conversationId, provider, transcript }, sender) {
   const cfg = (PROVIDERS[provider] || PROVIDERS.claude).cli;
+  // Read the active tab first (before any await, while S is still correct) so
+  // non-Claude CLIs can answer page-aware prompts.
+  const pageCtx = provider !== 'claude' ? await maybePageContext(transcript) : null;
   let Squire;
   try {
     ({ Squire } = await import('@pythonluvr/squire'));
@@ -1981,7 +2005,9 @@ async function runCliAI({ conversationId, provider, transcript }, sender) {
   });
   squire.on('exit', (code) => sender.send('ai:done', { conversationId, code }));
   try {
-    await squire.start(buildCliPrompt(transcript));
+    let prompt = buildCliPrompt(transcript);
+    if (pageCtx) prompt = pageCtx + '\n\n' + prompt;
+    await squire.start(prompt);
   } catch (err) {
     sender.send('ai:error', { conversationId, message: err.message });
     sender.send('ai:done', { conversationId, code: 1 });
@@ -2003,26 +2029,20 @@ async function runApiAI({ conversationId, provider, transcript }, sender) {
     return;
   }
   try {
-    if (kind === 'anthropic') {
-      // Agentic path: Claude can call browser/web tools and loop on results.
-      await runAnthropicAgent({
-        apiKey,
-        model,
-        system: AGENT_SYSTEM,
-        messages: buildAgentMessages(transcript),
-        tools: TOOLS,
-        onDelta: (delta) => sender.send('ai:delta', { conversationId, delta }),
-        onTool: (ev) => sender.send('ai:tool', { conversationId, ...ev }),
-        executeTool,
-      });
-    } else {
-      await STREAMERS[kind]({
-        apiKey,
-        model,
-        messages: buildApiMessages(transcript),
-        onDelta: (delta) => sender.send('ai:delta', { conversationId, delta }),
-      });
-    }
+    // Agentic path: every provider can call the browser/web tools and loop on
+    // results, so page-aware prompts ("Summarize this page") work on any API key.
+    const AGENTS = { anthropic: runAnthropicAgent, openai: runOpenAiAgent, google: runGoogleAgent };
+    const runAgent = AGENTS[kind] || runAnthropicAgent;
+    await runAgent({
+      apiKey,
+      model,
+      system: AGENT_SYSTEM,
+      messages: buildAgentMessages(transcript),
+      tools: TOOLS,
+      onDelta: (delta) => sender.send('ai:delta', { conversationId, delta }),
+      onTool: (ev) => sender.send('ai:tool', { conversationId, ...ev }),
+      executeTool,
+    });
     sender.send('ai:done', { conversationId, code: 0 });
   } catch (err) {
     sender.send('ai:error', { conversationId, message: err.message });
@@ -2171,6 +2191,7 @@ onWin('ready', () => {
   sendDownloads();
   sendBookmarks();
   sendBlocked();
+  sendPins(S);
   maybeShowFirstRun();
 });
 onWin('zoom', (_e, dir) => {
@@ -3134,11 +3155,54 @@ handleWin('extensions:remove', (_e, id) => {
     const ext = api.getAllExtensions().find((x) => x.id === id);
     api.removeExtension(id);
     if (ext) writeSettings({ extensions: (readSettings(pid).extensions || []).filter((p) => p !== ext.path) }, pid);
+    // Drop the removed extension from the pinned set so it doesn't dangle.
+    const pins = (readSettings(pid).pinnedExtensions || []).filter((x) => x !== id);
+    writeSettings({ pinnedExtensions: pins }, pid);
+    broadcastPins(pid);
     return { ok: true };
   } catch (e) {
     return { error: String(e.message || e) };
   }
 });
+
+// Extensions menu (puzzle dropdown): the installed list + which are pinned, plus
+// the session partition so the dropdown's action buttons resolve the right one.
+handleWin('extensions:menu', () => {
+  const pid = S.profileId;
+  let list = [];
+  try {
+    list = extApi(profileSession(pid))
+      .getAllExtensions()
+      .map((e) => ({ id: e.id, name: e.name }));
+  } catch {
+    list = [];
+  }
+  return {
+    list,
+    pinned: readSettings(pid).pinnedExtensions || [],
+    partition: pid === 'default' ? null : profilePartition(pid),
+  };
+});
+onWin('extensions:set-pinned', (_e, ids) => {
+  if (!Array.isArray(ids)) return;
+  const pid = S.profileId;
+  writeSettings({ pinnedExtensions: ids.filter((x) => typeof x === 'string') }, pid);
+  broadcastPins(pid);
+});
+
+// Tell a window's toolbar which extensions are pinned (it renders one action
+// button per pinned id and the live list comes from the browser-action bridge).
+function sendPins(W) {
+  if (!W || !W.chromeView) return;
+  try {
+    W.chromeView.webContents.send('ext:pins', readSettings(W.profileId).pinnedExtensions || []);
+  } catch {
+    /* ignore */
+  }
+}
+function broadcastPins(profileId) {
+  for (const W of windows) if (!profileId || W.profileId === profileId) sendPins(W);
+}
 
 // --- IPC: settings ---
 handleWin('settings:get', () => readSettings());

@@ -365,6 +365,77 @@ body::before {
   margin-bottom: 22px;
 }
 
+/* Conversation starters under the landing composer. */
+#landing-starters.starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 16px;
+}
+.starter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.starter-chip:hover {
+  background: var(--raised-2);
+  border-color: var(--border-strong);
+}
+.starter-chip .sc-del {
+  color: var(--faint);
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+.starter-chip:hover .sc-del {
+  opacity: 1;
+}
+.starter-chip .sc-del:hover {
+  color: var(--accent);
+}
+.starter-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.starter-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.sc-input {
+  padding: 7px 13px;
+  background: var(--field);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  width: 180px;
+}
+
 /* --- Chat thread --- */
 #chat {
   flex: 1;

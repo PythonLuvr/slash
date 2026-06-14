@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const KINDS = ['menu', 'profile', 'downloads', 'history', 'siteinfo', 'shield', 'setup', 'enginepick', 'tabmenu'];
+const KINDS = ['menu', 'profile', 'downloads', 'history', 'siteinfo', 'shield', 'setup', 'enginepick', 'tabmenu', 'extensions'];
 
 const hsearch = $('hsearch');
 
@@ -14,7 +14,81 @@ window.overlay.onShow((kind) => {
   }
   if (kind === 'menu') renderStats();
   if (kind === 'profile') renderProfile();
+  if (kind === 'extensions') renderExtMenu();
 });
+
+// --- Extensions dropdown (puzzle button) ---
+// Lists installed extensions: each row is the extension's action icon (click
+// opens its popup), its name, and a pin toggle. Pinning promotes it to a
+// dedicated toolbar button; everything unpinned lives here.
+const PIN_ICON =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 4h6l-1 7 3 3H7l3-3z"/></svg>';
+let extMenuPinned = [];
+let extMenuPartition = null;
+
+async function renderExtMenu() {
+  const wrap = $('ext-list');
+  if (!wrap) return;
+  let data = { list: [], pinned: [], partition: null };
+  try {
+    data = await window.overlay.extMenu();
+  } catch {
+    /* ignore */
+  }
+  extMenuPinned = Array.isArray(data.pinned) ? data.pinned : [];
+  extMenuPartition = data.partition || null;
+  const part = extMenuPartition || '_self';
+  let activeTab = -1;
+  try {
+    if (window.browserAction) {
+      const st = await window.browserAction.getState(part);
+      if (st && typeof st.activeTabId === 'number') activeTab = st.activeTabId;
+    }
+  } catch {
+    /* ignore */
+  }
+  wrap.innerHTML = '';
+  if (!data.list || !data.list.length) {
+    wrap.innerHTML = '<div class="ext-empty">No extensions installed. Add one from Settings.</div>';
+    return;
+  }
+  for (const e of data.list) {
+    const row = document.createElement('div');
+    row.className = 'ext-row';
+    const icon = document.createElement('button', { is: 'browser-action' });
+    icon.id = e.id;
+    icon.className = 'ext-row-icon';
+    if (extMenuPartition) icon.setAttribute('partition', extMenuPartition);
+    icon.setAttribute('tab', String(activeTab));
+    row.appendChild(icon);
+    const name = document.createElement('span');
+    name.className = 'ext-row-name';
+    name.textContent = e.name || e.id;
+    row.appendChild(name);
+    const pin = document.createElement('button');
+    pin.type = 'button';
+    const pinned = extMenuPinned.includes(e.id);
+    pin.className = 'ext-pin' + (pinned ? ' on' : '');
+    pin.title = pinned ? 'Unpin from toolbar' : 'Pin to toolbar';
+    pin.setAttribute('aria-label', pin.title);
+    pin.innerHTML = PIN_ICON;
+    pin.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      togglePin(e.id);
+    });
+    row.appendChild(pin);
+    wrap.appendChild(row);
+  }
+}
+
+function togglePin(id) {
+  const set = new Set(extMenuPinned);
+  if (set.has(id)) set.delete(id);
+  else set.add(id);
+  extMenuPinned = Array.from(set);
+  window.overlay.extSetPinned(extMenuPinned);
+  renderExtMenu();
+}
 
 // The profile is just your computer account: friendly name + account picture
 // (or a monogram), read locally with no sign-in.

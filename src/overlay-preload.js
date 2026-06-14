@@ -1,5 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Make the <browser-action> element available so the extensions dropdown can
+// render per-extension action buttons (and open their popups) in this popover
+// layer. Best-effort; needs this preload to run unsandboxed (see makeView).
+try {
+  require('electron-chrome-extensions/browser-action').injectBrowserAction();
+} catch {
+  /* extensions unavailable */
+}
+
 // Bridge for the top-right popover layer (menu / profile / downloads).
 contextBridge.exposeInMainWorld('overlay', {
   newTab: () => ipcRenderer.send('tab:new'),
@@ -34,6 +43,9 @@ contextBridge.exposeInMainWorld('overlay', {
   migrateRun: (id, types) => ipcRenderer.invoke('migrate:run', { id, types }),
   onSetupDefault: (cb) => ipcRenderer.on('setup:default', (_e, isDef) => cb(isDef)),
   onSetupSources: (cb) => ipcRenderer.on('setup:sources', (_e, list) => cb(list)),
+  // Extensions menu (puzzle dropdown): list + pinned set, and pin/unpin.
+  extMenu: () => ipcRenderer.invoke('extensions:menu'),
+  extSetPinned: (ids) => ipcRenderer.send('extensions:set-pinned', ids),
   onShow: (cb) => ipcRenderer.on('pop:show', (_e, kind) => cb(kind)),
   onDownloads: (cb) => ipcRenderer.on('downloads', (_e, list) => cb(list)),
   onHistory: (cb) => ipcRenderer.on('history', (_e, list) => cb(list)),

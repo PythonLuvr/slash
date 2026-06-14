@@ -220,6 +220,81 @@ body.full #composer {
   pointer-events: none;
 }
 
+/* Conversation starters: clickable quick prompts in the empty state. The
+   parent #empty disables pointer events, so re-enable them here. */
+.starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  pointer-events: auto;
+}
+
+.starter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.starter-chip:hover {
+  background: var(--raised-2);
+  border-color: var(--border-strong);
+}
+.starter-chip .sc-del {
+  color: var(--faint);
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+.starter-chip:hover .sc-del {
+  opacity: 1;
+}
+.starter-chip .sc-del:hover {
+  color: var(--accent);
+}
+
+.starter-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.starter-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.sc-input {
+  padding: 7px 12px;
+  background: var(--field);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+  width: 170px;
+}
+
 .msg {
   display: flex;
 }
